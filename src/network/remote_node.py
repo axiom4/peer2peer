@@ -33,8 +33,8 @@ class RemoteHttpNode(StorageNode):
                     data = json.loads(response.read())
                     return data.get('peers', [])
                 return []
-        except Exception as e:
-            # If we can't get peers, return empty list
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
+            # If we can't get peers due to network/parsing issues, return empty list
             return []
 
     def store(self, chunk_id: str, data: bytes) -> bool:
