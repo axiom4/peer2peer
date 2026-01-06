@@ -28,7 +28,7 @@ The system consists of autonomous nodes forming a dynamic mesh network.
 
 - Lightweight HTTP nodes based on `aiohttp`.
 - No central database: each node only knows its direct neighbors.
-- "Gossip" and "Query Forwarding" logic for request propagation.
+- "Gossip" and "Query Forwarding" logic for request propagation and data retrieval without central indexing.
 
 ### Graphical Visualization
 

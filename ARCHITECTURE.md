@@ -30,7 +30,7 @@ When a user uploads a file, the `ShardManager` executes an in-memory transformat
 The `DistributionStrategy` manages data dispersion:
 
 1. **Beacon Discovery**: The client listens for UDP broadcast beacons (Port 5000) to instantly map all active nodes in the LAN.
-2. **Node Selection**: For each chunk, **5 distinct nodes** are selected (Replication Factor $N=5$).
+2. **Node Selection**: For each chunk, **5 distinct nodes** are selected randomly (Replication Factor $N=5$).
 
    > This redundancy ensures data survival even if 4 out of 5 custodian nodes go offline simultaneously.
 
@@ -42,7 +42,7 @@ At the end of the upload, a `.manifest` (JSON) file is generated on the client s
 
 - Contains the decryption key (required to read the data).
 - Contains the ordered list of chunk hashes.
-- **Privacy**: Does not contain original file names or node IP addresses (localization occurs dynamically during restore).
+- **Privacy**: Does not contain original file names or node IP addresses (location is found dynamically during restore via Network Query).
 
 ---
 
@@ -50,12 +50,12 @@ At the end of the upload, a `.manifest` (JSON) file is generated on the client s
 
 The client does not know the data location a priori; it must discover it.
 
-### A. Network Querying
+### A. Network Querying (Fully Dynamic)
 
-The client analyzes the `.manifest` and for each chunk starts a search procedure:
+The client analyzes the `.manifest` and for each chunk launches a **Network Query**:
 
-1. **Localization**: Sends `HEAD` requests or lightweight queries to known nodes to check who owns the required `chunk_id`.
-2. **Optimized Retrieval**: Downloads the binary blob from the first node that responds positively (low latency).
+1. **Query Flooding / Random Walk**: The client asks known entry nodes for the specific `chunk_id`.
+2. **Optimized Retrieval**: Downloads the binary blob from the first node that responds with the data, effectively finding the data wherever it is stored in the network without pre-stored locations.
 
 ### B. Restore Pipeline (Reverse Engineering)
 
