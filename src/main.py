@@ -35,24 +35,15 @@ def setup_remote_network(entry_node: str) -> List[StorageNode]:
     try:
         # Use the client to ask for peers from the entry node
         temp_node = RemoteHttpNode(entry_node)
-
-        # HACK: ask for the peers list directly via HTTP (simple implementation)
-        # We should add a get_peers method to the interface or force the request here
-        import aiohttp
-
-        async def fetch_peers():
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{entry_node.rstrip('/')}/peers") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        peers = data['peers']
-                        # Add entry node too if missing
-                        if entry_node not in peers and entry_node.rstrip('/') not in peers:
-                            peers.append(entry_node)
-                        return peers
-                    return [entry_node]
-
-        peer_urls = asyncio.run(fetch_peers())
+        
+        # Ask for the peers list directly via HTTP using the get_peers method
+        peer_urls = temp_node.get_peers()
+        
+        # Add entry node too if missing
+        entry_normalized = entry_node.rstrip('/')
+        if entry_normalized not in peer_urls:
+            peer_urls.append(entry_normalized)
+        
         print(f"Network discovered: {len(peer_urls)} nodes -> {peer_urls}")
 
         nodes = []
