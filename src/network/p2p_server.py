@@ -19,7 +19,7 @@ class P2PServer:
         self.port = port
         self.storage_dir = storage_dir
         self.peers = set()
-        self.max_peers = 3  # Connection limit to form a sparse graph
+        self.max_peers = 5  # Connection limit to form a sparse graph
         self.seen_requests = collections.deque(maxlen=1000)  # Loop prevention
 
         # Automatic discovery
@@ -113,7 +113,7 @@ class P2PServer:
         return web.json_response({"peers": list(self.peers)})
 
     async def handle_upload_chunk(self, request):
-        """Saves a chunk locally. Could replicate to neighbors (TODO)."""
+        """Saves a chunk locally."""
         chunk_id = request.match_info['id']
         data = await request.read()
 
