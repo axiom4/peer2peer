@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.error
-from typing import Optional
+import json
+from typing import Optional, List
 from network.node import StorageNode
 
 
@@ -17,6 +18,24 @@ class RemoteHttpNode(StorageNode):
 
     def is_available(self) -> bool:
         return self._online
+
+    def get_peers(self) -> List[str]:
+        """
+        Fetches the list of peers from this node.
+        Returns a list of peer URLs.
+        """
+        try:
+            url = f"{self.url}/peers"
+            req = urllib.request.Request(url, method='GET')
+            req.add_header('Connection', 'close')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read())
+                    return data.get('peers', [])
+                return []
+        except Exception as e:
+            # If we can't get peers, return empty list
+            return []
 
     def store(self, chunk_id: str, data: bytes) -> bool:
         # Use standard urllib to avoid issues with nested asyncio loops and overhead
