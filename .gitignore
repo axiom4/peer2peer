@@ -1,0 +1,9 @@
+downloads/
+manifests/
+logs/
+*.log
+network_data/
+uploads_temp/
+venv/
+__pycache__/
+*.pyc
