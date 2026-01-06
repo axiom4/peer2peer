@@ -37,22 +37,14 @@ class DistributionStrategy:
 
         return success_nodes
 
-    def retrieve_chunk(self, chunk_id: str, possible_locations: List[str] = None) -> bytes:
+    def retrieve_chunk(self, chunk_id: str) -> bytes:
         """
         Attempts to retrieve a chunk from the network.
-        If `possible_locations` is empty (as in the new design), queries the cluster nodes (Network Query).
+        Queries the cluster nodes (Network Query).
         """
-        if possible_locations:
-            # Legacy mode: use locations if provided (for compatibility or optimization)
-            candidates = []
-            node_map = {n.get_id(): n for n in self.nodes}
-            for loc in possible_locations:
-                if loc in node_map:
-                    candidates.append(node_map[loc])
-        else:
-            # Query Mode: Ask nodes we know
-            candidates = [n for n in self.nodes if n.is_available()]
-            random.shuffle(candidates)  # Load balancing and random walk start
+        # Query Mode: Ask nodes we know
+        candidates = [n for n in self.nodes if n.is_available()]
+        random.shuffle(candidates)  # Load balancing and random walk start
 
         # Scan candidates
         for node in candidates:
