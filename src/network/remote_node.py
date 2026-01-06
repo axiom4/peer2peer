@@ -33,7 +33,7 @@ class RemoteHttpNode(StorageNode):
                     data = json.loads(response.read())
                     return data.get('peers', [])
                 return []
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
             # If we can't get peers due to network/parsing issues, return empty list
             return []
 
