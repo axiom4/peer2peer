@@ -9,9 +9,11 @@ An advanced peer-to-peer distribution and storage system designed to ensure secu
 - **Zero Knowledge**: Storage nodes only hold anonymous binary blobs. They do not possess decryption keys or metadata about the original files.
 - **High Resilience**:
   - **5x Redundancy**: Each chunk is replicated across 5 distinct nodes.
-  - **Multi-hop Routing**: Data recovery is possible even from nodes not directly connected.
-  - **Auto-Discovery**: Automatic peer detection via UDP Broadcast and HTTP Crawling.
+  - **UDP Storage Search**: Data location is discovered in real-time using UDP Broadcast queries (`QUERY_CHUNK`), removing the need for location metadata or HTTP crawling.
+  - **Auto-Discovery**: Automatic peer detection via UDP Broadcast (Port 9999).
 - **Total Privacy**: The "manifest" required to reconstruct the file resides only on the client and does NOT contain IP addresses, making it impossible to trace data location from the file itself.
+- **Graceful Exit**: Nodes support a "Unjoin" operation to offload data to peers and clean up storage before shutting down.
+- **Open Standards**: Full OpenAPI 3.0 documentation available on every node (`/openapi`).
 - **Full Web Interface**: Dashboard to manage files, view network topology, and monitor real-time distribution.
 
 ## System Architecture
