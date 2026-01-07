@@ -178,10 +178,10 @@ def distribute(args):
     key = CryptoManager.generate_key()
 
     shard_mgr = ShardManager(key)
-    print("Processing file...")
-    chunks = shard_mgr.process_file(file_path)
-
-    print(f"File split into {len(chunks)} chunks.")
+    print("Processing file and streaming uploads...")
+    
+    # Process is now a generator
+    chunk_generator = shard_mgr.process_file(file_path)
 
     chunks_info_for_manifest = []
 
@@ -196,13 +196,14 @@ def distribute(args):
         except RuntimeError as e:
             return None, f"Critical error distributing chunk {chunk['index']}: {e}"
 
-    print(f"Starting parallel upload (max 5 workers)...")
+    print(f"Starting pipeline (Processing -> Upload)...")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_chunk = {executor.submit(
-            upload_chunk_task, chunk): chunk for chunk in chunks}
+        # Create futures as we iterate the generator
+        futures_params = {executor.submit(upload_chunk_task, chunk): chunk 
+                          for chunk in chunk_generator}
 
-        for future in concurrent.futures.as_completed(future_to_chunk):
+        for future in concurrent.futures.as_completed(futures_params):
             chunk_res, error = future.result()
             if error:
                 print(error)

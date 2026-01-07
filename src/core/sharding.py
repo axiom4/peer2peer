@@ -12,16 +12,15 @@ class ShardManager:
     def __init__(self, key: bytes):
         self.crypto = CryptoManager(key)
 
-    def process_file(self, file_path: str) -> List[Dict[str, any]]:
+    def process_file(self, file_path: str) -> Generator[Dict[str, any], None, None]:
         """
-        Reads a file, splits it into chunks, compresses, encrypts chunks and returns data ready for distribution.
-        Returns a list of dictionaries containing minimal metadata (hash) and the encrypted blob.
+        Reads a file, splits it into chunks, compresses, encrypts chunks and yields data components.
+        Yields dictionaries containing minimal metadata (hash) and the encrypted blob.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        chunks_metadata = []
-
+        file_size = os.path.getsize(file_path)
         with open(file_path, 'rb') as f:
             index = 0
             while True:
@@ -46,12 +45,11 @@ class ShardManager:
                     "id": chunk_hash,
                     "data": binary_data,
                     "size": len(binary_data),
-                    "original_size": len(data)  # Optional: for statistics
+                    "original_size": len(data),
+                    "total_file_size": file_size
                 }
-                chunks_metadata.append(chunk_info)
+                yield chunk_info
                 index += 1
-
-        return chunks_metadata
 
     def reconstruct_file(self, chunks: List[Dict[str, any]], output_path: str):
         """
