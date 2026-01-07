@@ -29,9 +29,8 @@ class ShardManager:
                 if not data:
                     break
 
-                # Compresses the chunk (Best compression)
-                compressed_data = lzma.compress(
-                    data, preset=lzma.PRESET_EXTREME)
+                # Compresses the chunk (Standard compression for speed/ratio balance)
+                compressed_data = lzma.compress(data)
 
                 # Encrypts the compressed chunk (Fernet returns a B64 token)
                 fernet_token = self.crypto.encrypt(compressed_data)
