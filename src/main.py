@@ -35,15 +35,15 @@ def setup_remote_network(entry_node: str) -> List[StorageNode]:
     try:
         # Use the client to ask for peers from the entry node
         temp_node = RemoteHttpNode(entry_node)
-        
+
         # Ask for the peers list directly via HTTP using the get_peers method
         peer_urls = temp_node.get_peers()
-        
+
         # Add entry node too if missing
         entry_normalized = entry_node.rstrip('/')
         if entry_normalized not in peer_urls:
             peer_urls.append(entry_normalized)
-        
+
         print(f"Network discovered: {len(peer_urls)} nodes -> {peer_urls}")
 
         nodes = []
@@ -179,7 +179,7 @@ def distribute(args):
 
     shard_mgr = ShardManager(key)
     print("Processing file and streaming uploads...")
-    
+
     # Process is now a generator
     chunk_generator = shard_mgr.process_file(file_path)
 
@@ -200,7 +200,7 @@ def distribute(args):
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Create futures as we iterate the generator
-        futures_params = {executor.submit(upload_chunk_task, chunk): chunk 
+        futures_params = {executor.submit(upload_chunk_task, chunk): chunk
                           for chunk in chunk_generator}
 
         for future in concurrent.futures.as_completed(futures_params):
