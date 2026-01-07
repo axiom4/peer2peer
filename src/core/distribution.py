@@ -1,4 +1,5 @@
 import random
+import concurrent.futures
 from typing import List, Dict
 from network.node import StorageNode
 
@@ -24,12 +25,25 @@ class DistributionStrategy:
         selected_nodes = random.sample(available_nodes, self.redundancy_factor)
 
         success_nodes = []
-        for node in selected_nodes:
-            if node.store(chunk_id, data):
-                success_nodes.append(node.get_id())
-            else:
-                print(
-                    f"Warning: Failed to save chunk {chunk_id} on node {node.get_id()}")
+
+        def _store_task(node):
+            try:
+                if node.store(chunk_id, data):
+                    return node.get_id()
+            except Exception as e:
+                print(f"Error saving to {node.get_id()}: {e}")
+            return None
+
+        # Parallel upload to replicas
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected_nodes)) as executor:
+            futures = [executor.submit(_store_task, n) for n in selected_nodes]
+            for f in concurrent.futures.as_completed(futures):
+                res = f.result()
+                if res:
+                    success_nodes.append(res)
+                else:
+                    # Log handled in task
+                    pass
 
         if not success_nodes:
             raise RuntimeError(
