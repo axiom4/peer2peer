@@ -37,6 +37,22 @@ class RemoteHttpNode(StorageNode):
             # If we can't get peers due to network/parsing issues, return empty list
             return []
 
+    def list_chunks(self) -> List[str]:
+        """
+        Fetches the list of all chunk IDs stored on this node.
+        """
+        try:
+            url = f"{self.url}/chunks"
+            req = urllib.request.Request(url, method='GET')
+            req.add_header('Connection', 'close')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read())
+                    return data.get('chunks', [])
+                return []
+        except Exception:
+            return []
+
     def store(self, chunk_id: str, data: bytes) -> bool:
         # Use standard urllib to avoid issues with nested asyncio loops and overhead
         try:

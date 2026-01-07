@@ -37,6 +37,7 @@ class P2PServer:
             web.delete('/chunk/{id}', self.handle_delete_chunk),
             web.get('/chunk/{id}', self.handle_download_chunk),
             # HEAD is handled implicitly by GET
+            web.get('/chunks', self.handle_list_chunks),
             web.get('/status', self.handle_status)
         ])
 
@@ -200,6 +201,16 @@ class P2PServer:
         except Exception:
             pass
         return None
+
+    async def handle_list_chunks(self, request):
+        """Returns a list of all chunk IDs stored on this node."""
+        try:
+            chunks = os.listdir(self.storage_dir)
+            # Filter out hidden files or temps
+            chunks = [c for c in chunks if not c.startswith('.')]
+            return web.json_response({"chunks": chunks})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
 
     async def handle_status(self, request):
         return web.json_response({
