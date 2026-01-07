@@ -35,7 +35,24 @@ async def list_manifests(request):
     if not os.path.exists(manifests_dir):
         os.makedirs(manifests_dir)
     files = glob.glob(os.path.join(manifests_dir, "*.manifest"))
-    return web.json_response([os.path.basename(f) for f in files])
+    
+    results = []
+    for f in files:
+        try:
+            with open(f, 'r') as fp:
+                data = json.load(fp)
+                results.append({
+                    "filename": data.get("filename", os.path.basename(f).replace(".manifest", "")),
+                    "size": data.get("size", 0)
+                })
+        except Exception:
+            # Fallback if manifest is corrupted or old format
+             results.append({
+                "filename": os.path.basename(f).replace(".manifest", ""),
+                "size": 0
+            })
+
+    return web.json_response(results)
 
 
 async def upload_file(request):
@@ -84,6 +101,10 @@ async def download_file(request):
     manifest_name = data.get('manifest')
     if not manifest_name:
         return web.json_response({"status": "error", "message": "No manifest specified"}, status=400)
+    
+    # Auto-append extension if missing
+    if not manifest_name.endswith('.manifest'):
+        manifest_name += '.manifest'
 
     output_name = data.get(
         'output_name', manifest_name.replace('.manifest', ''))
@@ -189,6 +210,9 @@ async def check_chunk_task(session, chunk_id, peers):
 
 async def get_manifest_detail(request):
     name = request.match_info['name']
+    if not name.endswith('.manifest'):
+        name += '.manifest'
+        
     manifest_path = os.path.join('manifests', name)
     if not os.path.exists(manifest_path):
         return web.json_response({"error": "Manifest not found"}, status=404)
@@ -256,6 +280,9 @@ async def get_manifest_detail(request):
 
 async def delete_manifest(request):
     name = request.match_info['name']
+    if not name.endswith('.manifest'):
+        name += '.manifest'
+
     manifest_path = os.path.join('manifests', name)
     if not os.path.exists(manifest_path):
         return web.json_response({"error": "Manifest not found"}, status=404)

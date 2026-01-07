@@ -84,6 +84,15 @@
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+      function formatBytes(bytes, decimals = 2) {
+          if (!+bytes) return '0 Bytes';
+          const k = 1024;
+          const dm = decimals < 0 ? 0 : decimals;
+          const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+      }
+
       // --- Manifests ---
       async function loadManifests() {
         try {
@@ -95,15 +104,23 @@
             list.innerHTML = '<li class="list-group-item text-center">No manifests found</li>';
             return;
           }
-          data.forEach((name) => {
+          data.forEach((item) => {
+            // Handle both legacy string format (if cached) or new object format
+            const name = item.filename || item; 
+            const size = item.size ? formatBytes(item.size) : 'N/A';
+            const cleanName = name; // Name is already clean from backend
+
             const li = document.createElement("li");
             li.className = "list-group-item d-flex justify-content-between align-items-center";
             li.innerHTML = `
-                    <span class="text-truncate" style="max-width: 200px;" title="${name}">${name}</span>
-                    <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${name}')">Map</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${name}')">Restore</button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${name}')">Delete</button>
+                    <div class="d-flex align-items-center flex-grow-1 overflow-hidden">
+                        <span class="text-truncate fw-bold me-2" title="${cleanName}">${cleanName}</span>
+                        <span class="badge bg-light text-secondary border">${size}</span>
+                    </div>
+                    <div class="btn-group ms-2">
+                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${cleanName}')">Map</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')">Restore</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${cleanName}')">Delete</button>
                     </div>
                 `;
             list.appendChild(li);
@@ -121,7 +138,7 @@
           const result = await res.json();
 
           if (res.ok) {
-            alert(result.message);
+            // alert(result.message);
             loadManifests(); // Refresh list
           } else {
             alert("Error: " + (result.error || result.message));
