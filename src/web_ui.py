@@ -95,7 +95,8 @@ async def upload_file(request):
         )
 
         task_id = str(uuid.uuid4())
-        TASKS[task_id] = {"status": "processing", "percent": 0, "message": "Starting..."}
+        TASKS[task_id] = {"status": "processing",
+                          "percent": 0, "message": "Starting..."}
 
         def progress_cb(percent, message):
             TASKS[task_id]["percent"] = percent
@@ -106,7 +107,7 @@ async def upload_file(request):
                 TASKS[task_id]["status"] = "error"
 
         loop = asyncio.get_event_loop()
-        
+
         # Wrapper to properly await the executor future and handle top-level exceptions
         async def background_distribute():
             try:
@@ -118,9 +119,9 @@ async def upload_file(request):
 
         # Fire and forget (in background task)
         asyncio.create_task(background_distribute())
-        
+
         return web.json_response({
-            "status": "processing", 
+            "status": "processing",
             "task_id": task_id,
             "message": "Upload received, distribution started."
         })

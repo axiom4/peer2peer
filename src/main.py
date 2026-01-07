@@ -222,14 +222,16 @@ def distribute(args, progress_callback=None):
                 return
 
             chunks_info_for_manifest.append(chunk_res)
-            
+
             # Update progress
             processed_bytes += chunk_res.get('original_size', 0)
             if progress_callback and total_file_size > 0:
                 pct = int((processed_bytes / total_file_size) * 100)
                 # Ensure we don't say 100% until manifest is saved
-                if pct >= 100: pct = 99
-                progress_callback(pct, f"Distributed chunk {chunk_res['index']} ({int(processed_bytes/1024)}/{int(total_file_size/1024)} KB)")
+                if pct >= 100:
+                    pct = 99
+                progress_callback(
+                    pct, f"Distributed chunk {chunk_res['index']} ({int(processed_bytes/1024)}/{int(total_file_size/1024)} KB)")
 
     # Sort by index to keep manifest clean
     chunks_info_for_manifest.sort(key=lambda x: x['index'])
@@ -237,7 +239,7 @@ def distribute(args, progress_callback=None):
     meta_mgr = MetadataManager()
     manifest_path = meta_mgr.save_manifest(
         os.path.basename(file_path), key, chunks_info_for_manifest)
-    
+
     msg = f"Distribution completed successfully! Manifest: {os.path.basename(manifest_path)}"
     print(msg)
     if progress_callback:
