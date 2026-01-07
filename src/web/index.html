@@ -85,12 +85,12 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
       function formatBytes(bytes, decimals = 2) {
-          if (!+bytes) return '0 Bytes';
-          const k = 1024;
-          const dm = decimals < 0 ? 0 : decimals;
-          const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-          const i = Math.floor(Math.log(bytes) / Math.log(k));
-          return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        if (!+bytes) return "0 Bytes";
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
       }
 
       // --- Manifests ---
@@ -106,8 +106,8 @@
           }
           data.forEach((item) => {
             // Handle both legacy string format (if cached) or new object format
-            const name = item.filename || item; 
-            const size = item.size ? formatBytes(item.size) : 'N/A';
+            const name = item.filename || item;
+            const size = item.size ? formatBytes(item.size) : "N/A";
             const cleanName = name; // Name is already clean from backend
 
             const li = document.createElement("li");
