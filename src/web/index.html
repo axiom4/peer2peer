@@ -119,7 +119,7 @@
                     </div>
                     <div class="btn-group ms-2">
                         <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${cleanName}')">Map</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')">Restore</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')">Download</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${cleanName}')">Delete</button>
                     </div>
                 `;
@@ -284,10 +284,10 @@
       }
 
       async function downloadFile(manifestName) {
-        if (!confirm(`Reconstruct file from ${manifestName}?`)) return;
+        // if (!confirm(`Download file from ${manifestName}?`)) return;
         try {
           const statusDiv = document.getElementById("uploadStatus"); // Reusing status div
-          statusDiv.innerHTML = `<div class="alert alert-info">Reconstructing ${manifestName}... check server logs</div>`;
+          statusDiv.innerHTML = `<div class="alert alert-info">Preparing download for ${manifestName}...</div>`;
 
           const res = await fetch("/api/download", {
             method: "POST",
@@ -295,8 +295,21 @@
             body: JSON.stringify({ manifest: manifestName }),
           });
           const result = await res.json();
-          if (result.status === "ok") {
-            statusDiv.innerHTML = `<div class="alert alert-success">File reconstructed at: ${result.file}</div>`;
+          if (result.status === "ok" && result.download_url) {
+            statusDiv.innerHTML = `<div class="alert alert-success">Download started!</div>`;
+
+            // Trigger browser download
+            const a = document.createElement("a");
+            a.href = result.download_url;
+            a.download = manifestName.replace(".manifest", "");
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Hide alert after 3s
+            setTimeout(() => {
+              statusDiv.innerHTML = "";
+            }, 3000);
           } else {
             statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
           }

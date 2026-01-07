@@ -158,12 +158,16 @@ async def download_file(request):
         kill_node=None
     )
 
-    loop = asyncio.get_event_loop()
+    LOOP = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(None, lambda: reconstruct(args))
+        await LOOP.run_in_executor(None, lambda: reconstruct(args))
 
         if os.path.exists(output_path):
-            return web.json_response({"status": "ok", "file": output_path})
+            return web.json_response({
+                "status": "ok",
+                "message": "File reconstructed",
+                "download_url": f"/downloads/{output_name}"
+            })
         else:
             return web.json_response({"status": "error", "message": "Reconstruction produced no file"}, status=500)
     except Exception as e:
@@ -387,6 +391,9 @@ async def delete_manifest(request):
 
 
 def start_web_server(port=8888):
+    # Ensure downloads directory exists for static serving
+    os.makedirs('downloads', exist_ok=True)
+
     app = web.Application()
     # Increase client_max_size for large uploads (e.g. 500MB)
     app._client_max_size = 500 * 1024 * 1024
@@ -400,6 +407,7 @@ def start_web_server(port=8888):
         web.get('/api/progress/{task_id}', get_progress),
         web.post('/api/download', download_file),
         web.get('/api/network', get_network_graph),
+        web.static('/downloads', 'downloads'),
     ])
     print(f"Web UI available at http://localhost:{port}")
     web.run_app(app, port=port)
