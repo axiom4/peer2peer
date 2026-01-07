@@ -45,149 +45,117 @@ class RepairManager:
         found_urls = await scan_network(timeout=2)
         active_nodes_urls = set(u.rstrip('/') for u in found_urls)
 
-        loop = asyncio.get_running_loop()
-
-        # Determine actual health of "known" locations in manifest
-        all_manifest_locations = set()
-        for c in chunks:
-            for loc in c.get('locations', []):
-                all_manifest_locations.add(loc.rstrip('/'))
-
-        # Check health of ALL locations (discovered + listed)
-        health_map = {}
-        if progress_cb:
-            progress_cb(10, "Checking node health...")
-
-        async with aiohttp.ClientSession() as session:
-            check_tasks = []
-            distinct_hosts = active_nodes_urls.union(all_manifest_locations)
-            distinct_hosts_list = list(distinct_hosts)  # indexing
-
-            for url in distinct_hosts_list:
-                check_tasks.append(self.check_node_health(url, session))
-
-            if check_tasks:
-                results = await asyncio.gather(*check_tasks)
-                for i, is_up in enumerate(results):
-                    health_map[distinct_hosts_list[i]] = is_up
-
-        active_hosts = [url for url, is_up in health_map.items() if is_up]
-        if not active_hosts:
+        if not active_nodes_urls:
             if progress_cb:
                 progress_cb(-1, "No active nodes found in network!")
             return
 
+        loop = asyncio.get_running_loop()
+
+        # ------------------------------------------------------------------
+        # NEW LOGIC: Ignore manifest locations, Scan network for chunks
+        # ------------------------------------------------------------------
+        
+        if progress_cb:
+            progress_cb(10, "Surveying network for chunks (HEAD check)...")
+            
+        active_nodes_objects = [RemoteHttpNode(u) for u in active_nodes_urls]
+        
+        # Map: chunk_id -> list of nodes that have it
+        chunk_locations_map = {c['id']: [] for c in chunks}
+        
+        async def check_chunk_on_node(node_obj, c_id):
+             exists = await loop.run_in_executor(None, node_obj.check_exists, c_id)
+             if exists:
+                 return c_id, node_obj.get_id()
+             return None
+
+        # Create all survey tasks
+        survey_tasks = []
+        for c in chunks:
+            for node in active_nodes_objects:
+                survey_tasks.append(check_chunk_on_node(node, c['id']))
+        
+        results = await asyncio.gather(*survey_tasks)
+        
+        for res in results:
+            if res:
+                c_id, node_id = res
+                chunk_locations_map[c_id].append(node_id)
+
+
         # 2. Repair Loop
-        updates_needed = False
-        total_chunks = len(chunks)
-
-        # Helper for retrieval/storage
-        # We need actual Node objects
-        active_nodes_objects = [RemoteHttpNode(u) for u in active_hosts]
-
-        # Distribution Strategy for retrieval uses ALL active nodes (to find content)
-        # But for storage we select specific targets
-
         repaired_chunks_count = 0
+        total_chunks = len(chunks)
+        updates_performed = False
 
         for i, chunk in enumerate(chunks):
             chunk_id = chunk['id']
-            locations = chunk.get('locations', [])
-
-            # Filter live/dead
-            live_locations = [
-                loc for loc in locations if health_map.get(loc.rstrip('/'), False)]
-
-            # If a location has changed URL/IP it's tricky, but we assume static URLs/IDs for now.
+            # Locations discovered dynamically
+            live_locations = chunk_locations_map.get(chunk_id, [])
+            
+            # Remove locations key if it existed (migration cleanup)
+            if 'locations' in chunk:
+                del chunk['locations']
 
             current_redundancy = len(live_locations)
-
+            
             if current_redundancy < redundancy_target:
-                updates_needed = True
+                updates_performed = True
                 needed = redundancy_target - current_redundancy
-
+                
                 msg = f"Repairing Chunk {i} ({current_redundancy}/{redundancy_target} replicas)..."
                 if progress_cb:
                     progress_cb(10 + int((i/total_chunks)*80), msg)
-
+                
                 # Retrieve content
                 content = None
                 try:
-                    # Try to get from remaining live locations first
                     sources = [RemoteHttpNode(u) for u in live_locations]
+                    
                     if not sources:
-                        # Desperation: try all active nodes, maybe one has it but wasn't in manifest
-                        sources = active_nodes_objects
-
-                    if not sources:
-                        # Data Loss detected
-                        print(f"CRITICAL: Chunk {i} lost completely.")
-                        chunk['locations'] = []  # Data lost
+                        # Data Loss detected or just not found on active nodes
+                        # Try to use DistributionStrategy's retrieve which does a global query
+                        # (Although we just surveyed all active nodes via HEAD, maybe GET works if forwarded?)
+                        # But for now assume HEAD survey is authoritative for active nodes.
+                        print(f"CRITICAL: Chunk {i} lost completely (or nodes offline).")
                         continue
-
+                        
                     retriever = DistributionStrategy(sources)
                     content = await loop.run_in_executor(None, retriever.retrieve_chunk, chunk_id)
                 except Exception as e:
-                    print(
-                        f"Failed to retrieve chunk {chunk_id} for repair: {e}")
-                    # Keep old locations in hope they come back alive?
-                    # Or update to only live ones?
-                    # If we update to live ones, we admit data loss.
-                    # If we keep dead ones, we retry later.
-                    # Requirement says "migrate", implying we fix it now.
-                    # If we can't retrieve, we can't migrate.
-                    continue
-
+                    print(f"Failed to retrieve chunk {chunk_id} for repair: {e}")
+                    continue 
+                
                 # Upload to NEW nodes
-                candidates = [n for n in active_nodes_objects if n.get_id().rstrip(
-                    '/') not in [l.rstrip('/') for l in live_locations]]
-
+                candidates = [n for n in active_nodes_objects if n.get_id() not in live_locations]
+                
                 if not candidates:
-                    # No new nodes available to increase redundancy
-                    # Just update manifest to remove dead nodes
-                    chunk['locations'] = live_locations
                     continue
 
                 if len(candidates) < needed:
                     needed = len(candidates)
-
+                
                 if needed > 0:
                     selected_targets = random.sample(candidates, needed)
-                    new_locs = []
-
+                    
                     # Manual store
                     for node in selected_targets:
                         try:
                             # Run synchronously blocking call in executor
                             success = await loop.run_in_executor(None, node.store, chunk_id, content)
                             if success:
-                                new_locs.append(node.get_id())
+                                repaired_chunks_count += 1
                         except:
                             pass
-
-                    # Update locations
-                    chunk['locations'] = live_locations + new_locs
-                    repaired_chunks_count += 1
-
-            elif len(locations) != len(live_locations):
-                # We have enough redundancy, but some original nodes are dead.
-                # Update manifest to reflect reality?
-                # User said "if a node is turned off... migrate".
-                # If we have 5 copies, and 1 dies, we have 4. If target is 5, we migrate (add 1).
-                # This is handled by the block above.
-
-                # If we have 10 copies, and 1 dies, and target is 5. We have 9. > 5.
-                # We should just remove the dead one from manifest to keep it clean.
-                chunk['locations'] = live_locations
-                updates_needed = True
-
-        if updates_needed:
+            
+        if updates_performed or any('locations' in c for c in chunks):
+            # Save to strip locations and persist any other metadata changes if any
             self.meta_mgr.update_manifest_chunks(manifest['filename'], chunks)
             msg = f"Repair completed. Repaired {repaired_chunks_count} chunks."
-            if progress_cb:
-                progress_cb(100, msg)
+            if progress_cb: progress_cb(100, msg)
             return True
         else:
-            if progress_cb:
-                progress_cb(100, "Network healthy. No repairs needed.")
+            if progress_cb: progress_cb(100, "Network healthy. No repairs needed.")
             return False
+

@@ -50,6 +50,21 @@ class RemoteHttpNode(StorageNode):
             # print(f"Node {self.url} error: {e}")
             return False
 
+    def check_exists(self, chunk_id: str) -> bool:
+        """Checks if a chunk exists on this node (HEAD request)."""
+        try:
+            url = f"{self.url}/chunk/{chunk_id}"
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('Connection', 'close')
+            with urllib.request.urlopen(req, timeout=2) as response:
+                return response.status == 200
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            return False
+        except Exception:
+            return False
+
     def retrieve(self, chunk_id: str) -> bytes:
         try:
             url = f"{self.url}/chunk/{chunk_id}"

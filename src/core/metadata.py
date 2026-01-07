@@ -21,8 +21,8 @@ class MetadataManager:
             "chunks": [
                 {
                     "index": c["index"],
-                    "id": c["id"],
-                    "locations": c.get("locations", [])
+                    "id": c["id"]
+                    # "locations" removed for privacy/distributed logic
                 } for c in chunks_info
             ]
         }
