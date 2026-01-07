@@ -12,9 +12,9 @@ class ShardManager:
     def __init__(self, key: bytes):
         self.crypto = CryptoManager(key)
 
-    def process_file(self, file_path: str) -> Generator[Dict[str, any], None, None]:
+    def process_file(self, file_path: str, compression=True) -> Generator[Dict[str, any], None, None]:
         """
-        Reads a file, splits it into chunks, compresses, encrypts chunks and yields data components.
+        Reads a file, splits it into chunks, compresses (optional), encrypts chunks and yields data components.
         Yields dictionaries containing minimal metadata (hash) and the encrypted blob.
         """
         if not os.path.exists(file_path):
@@ -29,10 +29,13 @@ class ShardManager:
                     break
 
                 # Compresses the chunk (Standard compression for speed/ratio balance)
-                compressed_data = lzma.compress(data)
+                if compression:
+                    processed_data = lzma.compress(data)
+                else:
+                    processed_data = data
 
                 # Encrypts the compressed chunk (Fernet returns a B64 token)
-                fernet_token = self.crypto.encrypt(compressed_data)
+                fernet_token = self.crypto.encrypt(processed_data)
 
                 # BINARY PACKING: Decode B64 to save raw bytes (~33% savings)
                 binary_data = base64.urlsafe_b64decode(fernet_token)

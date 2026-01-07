@@ -71,60 +71,86 @@ async def list_manifests(request):
 
 async def upload_file(request):
     reader = await request.multipart()
-    field = await reader.next()
-    if field.name == 'file':
-        filename = field.filename
-        upload_dir = "uploads_temp"
-        os.makedirs(upload_dir, exist_ok=True)
-        temp_path = os.path.join(upload_dir, filename)
 
-        size = 0
-        with open(temp_path, 'wb') as f:
-            while True:
-                chunk = await field.read_chunk()
-                if not chunk:
-                    break
-                size += len(chunk)
-                f.write(chunk)
+    # Defaults
+    filename = None
+    temp_path = None
+    redundancy = 5
+    compression = True
 
-        # Prepare args for distribute
-        args = SimpleNamespace(
-            file=temp_path,
-            entry_node=None,  # Will trigger default setup or scan if scan=True
-            scan=True        # Force Scan for Web UI
-        )
+    while True:
+        field = await reader.next()
+        if field is None:
+            break
 
-        task_id = str(uuid.uuid4())
-        TASKS[task_id] = {"status": "processing",
-                          "percent": 0, "message": "Starting..."}
+        if field.name == 'file':
+            filename = field.filename
+            upload_dir = "uploads_temp"
+            os.makedirs(upload_dir, exist_ok=True)
+            temp_path = os.path.join(upload_dir, filename)
 
-        def progress_cb(percent, message):
-            TASKS[task_id]["percent"] = percent
-            TASKS[task_id]["message"] = message
-            if percent == 100:
-                TASKS[task_id]["status"] = "completed"
-            elif percent == -1:
-                TASKS[task_id]["status"] = "error"
+            with open(temp_path, 'wb') as f:
+                while True:
+                    chunk = await field.read_chunk()
+                    if not chunk:
+                        break
+                    f.write(chunk)
 
-        loop = asyncio.get_event_loop()
-
-        # Wrapper to properly await the executor future and handle top-level exceptions
-        async def background_distribute():
+        elif field.name == 'redundancy':
+            val = await field.read(decode=True)
             try:
-                await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
-            except Exception as e:
-                print(f"Background distribution error: {e}")
-                TASKS[task_id]["status"] = "error"
-                TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
+                redundancy = int(val.decode('utf-8'))
+            except:
+                pass
 
-        # Fire and forget (in background task)
-        asyncio.create_task(background_distribute())
+        elif field.name == 'compression':
+            val = await field.read(decode=True)
+            val_str = val.decode('utf-8').lower()
+            compression = (val_str == 'true')
 
-        return web.json_response({
-            "status": "processing",
-            "task_id": task_id,
-            "message": "Upload received, distribution started."
-        })
+    if not temp_path:
+        return web.json_response({"status": "error", "message": "No file uploaded"}, status=400)
+
+    # Prepare args for distribute
+    args = SimpleNamespace(
+        file=temp_path,
+        entry_node=None,
+        scan=True,
+        redundancy=redundancy,
+        compression=compression
+    )
+
+    task_id = str(uuid.uuid4())
+    TASKS[task_id] = {"status": "processing",
+                      "percent": 0, "message": "Starting..."}
+
+    def progress_cb(percent, message):
+        TASKS[task_id]["percent"] = percent
+        TASKS[task_id]["message"] = message
+        if percent == 100:
+            TASKS[task_id]["status"] = "completed"
+        elif percent == -1:
+            TASKS[task_id]["status"] = "error"
+
+    loop = asyncio.get_event_loop()
+
+    # Wrapper to properly await the executor future and handle top-level exceptions
+    async def background_distribute():
+        try:
+            await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
+        except Exception as e:
+            print(f"Background distribution error: {e}")
+            TASKS[task_id]["status"] = "error"
+            TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
+
+    # Fire and forget (in background task)
+    asyncio.create_task(background_distribute())
+
+    return web.json_response({
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Upload received, distribution started."
+    })
 
     return web.Response(status=400, text="No file provided")
 

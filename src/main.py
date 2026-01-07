@@ -160,15 +160,18 @@ def distribute(args, progress_callback=None):
         nodes = []
         for url in found_peers:
             nodes.append(RemoteHttpNode(url))
-        # Increase redundancy to 5 as requested
-        redundancy = min(len(nodes), 5)
+        # Increase redundancy to 5 as requested, or user override
+        redundancy = getattr(args, 'redundancy', 5)
+        # Cap redundancy to node count (can't have more copies than nodes)
+        if redundancy > len(nodes):
+            redundancy = len(nodes)
         if redundancy < 1:
             redundancy = 1
     else:
         print("No --entry-node or --scan specified, using local simulation.")
         nodes = setup_local_network()
         # Increase redundancy for local fallback too if possible (but local nodes are only 5 usually)
-        redundancy = 5
+        redundancy = getattr(args, 'redundancy', 5)
 
     distributor = DistributionStrategy(nodes, redundancy_factor=redundancy)
 
@@ -184,7 +187,9 @@ def distribute(args, progress_callback=None):
     print("Processing file and streaming uploads...")
 
     # Process is now a generator
-    chunk_generator = shard_mgr.process_file(file_path)
+    use_compression = getattr(args, 'compression', True)
+    chunk_generator = shard_mgr.process_file(
+        file_path, compression=use_compression)
 
     chunks_info_for_manifest = []
 
