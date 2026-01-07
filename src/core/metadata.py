@@ -10,8 +10,13 @@ class MetadataManager:
 
     def save_manifest(self, filename: str, key: bytes, chunks_info: list):
         """Saves the file manifest. This file MUST remain private to the owner."""
+        
+        # Calculate total size if available in chunks metadata
+        total_size = sum(c.get('original_size', 0) for c in chunks_info)
+
         manifest = {
             "filename": filename,
+            "size": total_size,
             "key": key.decode('utf-8'),  # The key is needed to decrypt
             "chunks": [
                 {
