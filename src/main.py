@@ -131,12 +131,15 @@ def start_server(args):
         print("Server stopped.")
 
 
-def distribute(args):
+def distribute(args, progress_callback=None):
     """Upload/distribution logic with redundancy."""
     file_path = args.file
     if not os.path.exists(file_path):
         print(f"Error: File {file_path} not found.")
         return
+
+    if progress_callback:
+        progress_callback(0, "Scanning network...")
 
     # Choose network type
     if args.entry_node:
@@ -197,6 +200,11 @@ def distribute(args):
             return None, f"Critical error distributing chunk {chunk['index']}: {e}"
 
     print(f"Starting pipeline (Processing -> Upload)...")
+    if progress_callback:
+        progress_callback(5, "Starting processing pipeline...")
+
+    processed_bytes = 0
+    total_file_size = os.path.getsize(file_path)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Create futures as we iterate the generator
@@ -208,10 +216,20 @@ def distribute(args):
             if error:
                 print(error)
                 print("Stopping distribution due to critical error.")
+                if progress_callback:
+                    progress_callback(-1, f"Error: {error}")
                 executor.shutdown(wait=False, cancel_futures=True)
                 return
 
             chunks_info_for_manifest.append(chunk_res)
+            
+            # Update progress
+            processed_bytes += chunk_res.get('original_size', 0)
+            if progress_callback and total_file_size > 0:
+                pct = int((processed_bytes / total_file_size) * 100)
+                # Ensure we don't say 100% until manifest is saved
+                if pct >= 100: pct = 99
+                progress_callback(pct, f"Distributed chunk {chunk_res['index']} ({int(processed_bytes/1024)}/{int(total_file_size/1024)} KB)")
 
     # Sort by index to keep manifest clean
     chunks_info_for_manifest.sort(key=lambda x: x['index'])
@@ -219,7 +237,11 @@ def distribute(args):
     meta_mgr = MetadataManager()
     manifest_path = meta_mgr.save_manifest(
         os.path.basename(file_path), key, chunks_info_for_manifest)
-    print(f"\nDistribution completed successfully!")
+    
+    msg = f"Distribution completed successfully! Manifest: {os.path.basename(manifest_path)}"
+    print(msg)
+    if progress_callback:
+        progress_callback(100, msg)
     print(f"Manifest saved in: {manifest_path}")
 
 

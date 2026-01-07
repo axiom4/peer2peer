@@ -25,9 +25,23 @@ except ImportError:
         from src.network.discovery import scan_network
 
 
+import uuid
+
+# Global task tracker
+TASKS = {}
+
+
 async def handle_index(request):
     path = os.path.join(os.path.dirname(__file__), 'web/index.html')
     return web.FileResponse(path)
+
+
+async def get_progress(request):
+    task_id = request.match_info['task_id']
+    task = TASKS.get(task_id)
+    if not task:
+        return web.json_response({"status": "error", "message": "Task not found"}, status=404)
+    return web.json_response(task)
 
 
 async def list_manifests(request):
@@ -80,14 +94,36 @@ async def upload_file(request):
             scan=True        # Force Scan for Web UI
         )
 
+        task_id = str(uuid.uuid4())
+        TASKS[task_id] = {"status": "processing", "percent": 0, "message": "Starting..."}
+
+        def progress_cb(percent, message):
+            TASKS[task_id]["percent"] = percent
+            TASKS[task_id]["message"] = message
+            if percent == 100:
+                TASKS[task_id]["status"] = "completed"
+            elif percent == -1:
+                TASKS[task_id]["status"] = "error"
+
         loop = asyncio.get_event_loop()
-        try:
-            # Run distribute in executor to avoid blocking
-            # distribute prints to stdout, check server console
-            await loop.run_in_executor(None, lambda: distribute(args))
-            return web.json_response({"status": "ok", "message": f"File {filename} distributed successfully."})
-        except Exception as e:
-            return web.json_response({"status": "error", "message": str(e)}, status=500)
+        
+        # Wrapper to properly await the executor future and handle top-level exceptions
+        async def background_distribute():
+            try:
+                await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
+            except Exception as e:
+                print(f"Background distribution error: {e}")
+                TASKS[task_id]["status"] = "error"
+                TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
+
+        # Fire and forget (in background task)
+        asyncio.create_task(background_distribute())
+        
+        return web.json_response({
+            "status": "processing", 
+            "task_id": task_id,
+            "message": "Upload received, distribution started."
+        })
 
     return web.Response(status=400, text="No file provided")
 
@@ -360,6 +396,7 @@ def start_web_server(port=8888):
         web.get('/api/manifests/{name}', get_manifest_detail),
         web.delete('/api/manifests/{name}', delete_manifest),
         web.post('/api/upload', upload_file),
+        web.get('/api/progress/{task_id}', get_progress),
         web.post('/api/download', download_file),
         web.get('/api/network', get_network_graph),
     ])
