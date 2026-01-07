@@ -353,5 +353,5 @@ flowchart TD
     Select --> Retrieve[Retrieve Chunk from a Survivor]
     Retrieve --> Replicate[PUT to New Candidate]
 
-    Replicate --> Restore[✅ Redundancy Restored (N=5)]
+    Replicate --> Restore["✅ Redundancy Restored (N=5)"]
 ```
