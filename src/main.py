@@ -204,34 +204,62 @@ def distribute(args, progress_callback=None):
         progress_callback(5, "Starting processing pipeline...")
 
     processed_bytes = 0
+    sharded_bytes = 0
     total_file_size = os.path.getsize(file_path)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        # Create futures as we iterate the generator
-        futures_params = {executor.submit(upload_chunk_task, chunk): chunk
-                          for chunk in chunk_generator}
+    pending_futures = set()
 
-        for future in concurrent.futures.as_completed(futures_params):
-            chunk_res, error = future.result()
+    def update_combined_progress():
+        if progress_callback and total_file_size > 0:
+            # 30% weight for Sharding, 70% for Distribution
+            p_shard = (sharded_bytes / total_file_size) * 30
+            p_dist = (processed_bytes / total_file_size) * 69
+            pct = int(p_shard + p_dist)
+            if pct >= 100:
+                pct = 99
+
+            # Message priorities
+            msg = f"Processing: {int(sharded_bytes/1024)}KB | Distributed: {int(processed_bytes/1024)}KB"
+            progress_callback(pct, msg)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+
+        # 1. Pipeline Loop: Shard -> Submit -> Check Done (Interleaved)
+        for chunk in chunk_generator:
+            sharded_bytes += chunk['original_size']
+
+            # Submit upload task
+            future = executor.submit(upload_chunk_task, chunk)
+            pending_futures.add(future)
+
+            # Check for any completed tasks (non-blocking)
+            done, _ = concurrent.futures.wait(pending_futures, timeout=0)
+            for f in done:
+                pending_futures.remove(f)
+                chunk_res, error = f.result()
+                if error:
+                    print(error)
+                    if progress_callback:
+                        progress_callback(-1, f"Error: {error}")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
+                chunks_info_for_manifest.append(chunk_res)
+                processed_bytes += chunk_res.get('original_size', 0)
+
+            update_combined_progress()
+
+        # 2. Drain remaining tasks
+        for f in concurrent.futures.as_completed(pending_futures):
+            chunk_res, error = f.result()
             if error:
                 print(error)
-                print("Stopping distribution due to critical error.")
                 if progress_callback:
                     progress_callback(-1, f"Error: {error}")
-                executor.shutdown(wait=False, cancel_futures=True)
                 return
 
             chunks_info_for_manifest.append(chunk_res)
-
-            # Update progress
             processed_bytes += chunk_res.get('original_size', 0)
-            if progress_callback and total_file_size > 0:
-                pct = int((processed_bytes / total_file_size) * 100)
-                # Ensure we don't say 100% until manifest is saved
-                if pct >= 100:
-                    pct = 99
-                progress_callback(
-                    pct, f"Distributed chunk {chunk_res['index']} ({int(processed_bytes/1024)}/{int(total_file_size/1024)} KB)")
+            update_combined_progress()
 
     # Sort by index to keep manifest clean
     chunks_info_for_manifest.sort(key=lambda x: x['index'])
