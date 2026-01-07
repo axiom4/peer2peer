@@ -6,7 +6,7 @@ from typing import List, Dict, Set
 from core.metadata import MetadataManager
 from core.distribution import DistributionStrategy
 from network.remote_node import RemoteHttpNode
-from network.discovery import scan_network
+from network.discovery import scan_network, udp_search_chunk_owners
 
 
 class RepairManager:
@@ -53,32 +53,26 @@ class RepairManager:
         loop = asyncio.get_running_loop()
 
         # ------------------------------------------------------------------
-        # NEW LOGIC: Ignore manifest locations, Scan network for chunks
+        # NEW LOGIC: UDP Broadcast Query for Locations
         # ------------------------------------------------------------------
 
         if progress_cb:
-            progress_cb(10, "Surveying network inventory (Broadcast LIST)...")
+            progress_cb(10, "Surveying network inventory (UDP SEARCH)...")
 
+        # Prepare active nodes objects for later use (replication targets)
         active_nodes_objects = [RemoteHttpNode(u) for u in active_nodes_urls]
-        chunk_locations_map = {c['id']: [] for c in chunks}
 
-        # Instead of checking every chunk on every node (N*M), we ask every node for its list (N).
-        # This is strictly "ask everyone what they have" which is consistent with "broadcast query".
+        # Build map of chunk_id -> [urls]
+        all_chunk_ids = [c['id'] for c in chunks]
 
-        async def fetch_node_inventory(node_obj):
-            # list_chunks returns [chunk_id1, chunk_id2...] or empty
-            inventory = await loop.run_in_executor(None, node_obj.list_chunks)
-            return node_obj.get_id(), inventory
+        # UDP Broadcast Search
+        # This asks "Who has chunk X?" and gets "I have chunk X" from node Y
+        chunk_locations_map = await udp_search_chunk_owners(all_chunk_ids, timeout=3)
 
-        inventory_tasks = [fetch_node_inventory(
-            n) for n in active_nodes_objects]
-        inventory_results = await asyncio.gather(*inventory_tasks)
-
-        # Build reverse map
-        for node_id, inv in inventory_results:
-            for c_id in inv:
-                if c_id in chunk_locations_map:
-                    chunk_locations_map[c_id].append(node_id)
+        # Ensure all chunks are keys even if empty
+        for cid in all_chunk_ids:
+            if cid not in chunk_locations_map:
+                chunk_locations_map[cid] = []
 
         # 2. Repair Loop
         repaired_chunks_count = 0

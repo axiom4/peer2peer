@@ -7,7 +7,9 @@ import collections
 import time
 import random
 import asyncio
-from network.discovery import DiscoveryService
+import shutil
+import sys
+from network.discovery import DiscoveryService, udp_search_chunk_owners
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,8 +24,11 @@ class P2PServer:
         self.max_peers = 5  # Connection limit to form a sparse graph
         self.seen_requests = collections.deque(maxlen=1000)  # Loop prevention
 
-        # Automatic discovery
+        # Automatic discovery with storage check capability
         self.discovery = DiscoveryService(self.port)
+
+        # Link storage check to discovery service
+        self.discovery.set_storage_check(self._check_storage)
 
         if not os.path.exists(self.storage_dir):
             os.makedirs(self.storage_dir)
@@ -38,10 +43,15 @@ class P2PServer:
             web.get('/chunk/{id}', self.handle_download_chunk),
             # HEAD is handled implicitly by GET
             web.get('/chunks', self.handle_list_chunks),
-            web.get('/status', self.handle_status)
+            web.get('/status', self.handle_status),
+            web.get('/openapi', self.handle_openapi),
+            web.post('/unjoin', self.handle_unjoin)
         ])
 
         self.known_peer = known_peer  # Url of a peer to join at startup
+
+    def _check_storage(self, chunk_id):
+        return os.path.exists(os.path.join(self.storage_dir, chunk_id))
 
     async def start(self):
         # Start UDP Discovery
@@ -162,45 +172,30 @@ class P2PServer:
         if request.method == 'HEAD':
             return web.Response(status=404)
 
-        # 2. Forwarding Management (Path finding)
-        request_id = request.headers.get(
-            'X-Request-Id', f"{self.port}-{time.time()}-{random.randint(0, 1000)}")
-        hops = int(request.headers.get('X-Hops', 3))  # Default 3 hop
+        # 2. UDP Search and Retrieve (replaces HTTP Forwarding)
+        logger.info(
+            f"Chunk {chunk_id} not found locally. Searching via UDP...")
 
-        if request_id in self.seen_requests:
-            return web.Response(status=404, text="Loop detected")
-        self.seen_requests.append(request_id)
+        # Search the cluster
+        results = await udp_search_chunk_owners([chunk_id], timeout=2.0)
+        owners = results.get(chunk_id, [])
 
-        if hops > 0:
-            logger.info(
-                f"Chunk {chunk_id} not found locally. Forwarding request (hops={hops})...")
-            # Forward to all peers in parallel
-            tasks = []
+        if owners:
+            logger.info(f"Chunk {chunk_id} located on: {owners}")
+            # Try to download from any available owner
             async with aiohttp.ClientSession() as session:
-                for peer in self.peers:
-                    tasks.append(self._forward_request(
-                        session, peer, chunk_id, request_id, hops - 1))
+                for owner in owners:
+                    try:
+                        # Direct HTTP download from the discovered active node
+                        async with session.get(f"{owner}/chunk/{chunk_id}", timeout=5) as resp:
+                            if resp.status == 200:
+                                return web.Response(body=await resp.read())
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to fetch {chunk_id} from {owner}: {e}")
+                        continue
 
-                # Wait for first success
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for res in results:
-                    if isinstance(res, bytes) and res:
-                        return web.Response(body=res)
-
-        return web.Response(status=404, text="Chunk not found in network path")
-
-    async def _forward_request(self, session, peer, chunk_id, request_id, hops):
-        try:
-            url = f"{peer}/chunk/{chunk_id}"
-            headers = {'X-Request-Id': request_id, 'X-Hops': str(hops)}
-            # Short timeout to avoid blocking
-            async with session.get(url, headers=headers, timeout=2) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-        except Exception:
-            pass
-        return None
+        return web.Response(status=404, text="Chunk not found in cluster")
 
     async def handle_list_chunks(self, request):
         """Returns a list of all chunk IDs stored on this node."""
@@ -219,3 +214,235 @@ class P2PServer:
             "peers": list(self.peers),
             "chunks_count": len(os.listdir(self.storage_dir))
         })
+
+    async def handle_openapi(self, request):
+        spec = {
+            "openapi": "3.0.0",
+            "info": {
+                "title": "P2P Node API",
+                "version": "1.0.0"
+            },
+            "paths": {
+                "/status": {
+                    "get": {
+                        "summary": "Get node status",
+                        "responses": {
+                            "200": {
+                                "description": "Node status",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "host": {"type": "string"},
+                                                "port": {"type": "integer"},
+                                                "peers": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"}
+                                                },
+                                                "chunks_count": {"type": "integer"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/chunks": {
+                    "get": {
+                        "summary": "List stored chunks",
+                        "responses": {
+                            "200": {
+                                "description": "List of chunk IDs",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "chunks": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/chunk/{id}": {
+                    "get": {
+                        "summary": "Download a chunk",
+                        "parameters": [
+                            {"name": "id", "in": "path", "required": True,
+                                "schema": {"type": "string"}}
+                        ],
+                        "responses": {
+                            "200": {"description": "Chunk binary data"},
+                            "404": {"description": "Chunk not found"}
+                        }
+                    },
+                    "put": {
+                        "summary": "Upload a chunk",
+                        "parameters": [
+                            {"name": "id", "in": "path", "required": True,
+                                "schema": {"type": "string"}}
+                        ],
+                        "requestBody": {
+                            "content": {
+                                "application/octet-stream": {
+                                    "schema": {"type": "string", "format": "binary"}
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {"description": "Chunk uploaded"}
+                        }
+                    },
+                    "delete": {
+                        "summary": "Delete a chunk",
+                        "parameters": [
+                            {"name": "id", "in": "path", "required": True,
+                                "schema": {"type": "string"}}
+                        ],
+                        "responses": {
+                            "200": {"description": "Chunk deleted"}
+                        }
+                    }
+                },
+                "/peers": {
+                    "get": {
+                        "summary": "Get known peers",
+                        "responses": {
+                            "200": {
+                                "description": "List of peers",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "peers": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "/join": {
+                    "post": {
+                        "summary": "Join the network",
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "host": {"type": "string"},
+                                            "port": {"type": "integer"}
+                                        },
+                                        "required": ["host", "port"]
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {
+                            "200": {"description": "Joined successfully"}
+                        }
+                    }
+                },
+                "/unjoin": {
+                    "post": {
+                        "summary": "Leave the network gracefully",
+                        "description": "Transfers all data to other peers, deletes local storage, and shuts down.",
+                        "responses": {
+                            "200": {"description": "Unjoined successfully"}
+                        }
+                    }
+                }
+            }
+        }
+        return web.json_response(spec)
+
+    async def handle_unjoin(self, request):
+        logger.info("Unjoin requested. Starting graceful shutdown...")
+
+        # 1. Identify chunks
+        try:
+            chunks = [f for f in os.listdir(
+                self.storage_dir) if not f.startswith('.')]
+        except FileNotFoundError:
+            chunks = []
+
+        if chunks:
+            # 2. Find targets: use discovered peers
+            candidates = list(self.peers)
+            if not candidates:
+                # Try to update peers from discovery service just in case
+                self.peers.update(self.discovery.get_discovered_peers())
+                candidates = list(self.peers)
+
+            if not candidates:
+                logger.warning(
+                    "No peers found to transfer data to! Unjoin will cause data loss.")
+            else:
+                logger.info(
+                    f"Transferring {len(chunks)} chunks to peers: {candidates}")
+                async with aiohttp.ClientSession() as session:
+                    for chunk_id in chunks:
+                        file_path = os.path.join(self.storage_dir, chunk_id)
+                        try:
+                            # Read content
+                            with open(file_path, 'rb') as f:
+                                content = f.read()
+
+                            # Try to upload to active peers
+                            random.shuffle(candidates)
+                            transferred = False
+                            for peer in candidates:
+                                try:
+                                    # We use PUT /chunk/{id} which validates if chunk exists, but here we enforce write
+                                    url = f"{peer}/chunk/{chunk_id}"
+                                    async with session.put(url, data=content, timeout=5) as resp:
+                                        if resp.status == 200:
+                                            transferred = True
+                                            logger.info(
+                                                f"Offloaded {chunk_id} to {peer}")
+                                            break
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Failed offload {chunk_id} to {peer}: {e}")
+
+                            if not transferred:
+                                logger.error(
+                                    f"Failed to offload {chunk_id} to any peer.")
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error handling backup of {chunk_id}: {e}")
+
+        # 3. Stop Discovery
+        self.discovery.stop()
+
+        # 4. Delete Storage
+        try:
+            shutil.rmtree(self.storage_dir)
+            logger.info(f"Deleted storage directory: {self.storage_dir}")
+        except Exception as e:
+            logger.error(f"Failed to delete storage: {e}")
+
+        # 5. Shutdown Server
+        asyncio.create_task(self._shutdown_server())
+
+        return web.json_response({"status": "Unjoined. Node is shutting down."})
+
+    async def _shutdown_server(self):
+        logger.info("Waiting 1s before process exit...")
+        await asyncio.sleep(1)
+        os._exit(0)
