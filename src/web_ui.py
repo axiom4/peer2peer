@@ -11,11 +11,15 @@ try:
     # If running as module or from root
     from src.main import distribute, reconstruct
     from src.network.discovery import scan_network
+    from src.core.repair import RepairManager
+    from src.core.metadata import MetadataManager
 except ImportError:
     try:
         # If running from src directory
         from main import distribute, reconstruct
         from network.discovery import scan_network
+        from core.repair import RepairManager
+        from core.metadata import MetadataManager
     except ImportError as e:
         print(f"Import Error: {e}")
         # Last resort for direct execution
@@ -23,6 +27,8 @@ except ImportError:
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         from src.main import distribute, reconstruct
         from src.network.discovery import scan_network
+        from src.core.repair import RepairManager
+        from src.core.metadata import MetadataManager
 
 
 import uuid
@@ -198,6 +204,49 @@ async def download_file(request):
             return web.json_response({"status": "error", "message": "Reconstruction produced no file"}, status=500)
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
+async def repair_file(request):
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"status": "error", "message": "Invalid JSON"}, status=400)
+
+    manifest_name = data.get('manifest')
+    if not manifest_name:
+        return web.json_response({"status": "error", "message": "No manifest specified"}, status=400)
+
+    task_id = str(uuid.uuid4())
+    TASKS[task_id] = {"status": "processing",
+                      "percent": 0, "message": "Starting repair..."}
+
+    def progress_cb(percent, message):
+        TASKS[task_id]["percent"] = percent
+        TASKS[task_id]["message"] = message
+        if percent == 100:
+            TASKS[task_id]["status"] = "completed"
+        elif percent == -1:
+            TASKS[task_id]["status"] = "error"
+
+    loop = asyncio.get_event_loop()
+
+    async def background_repair():
+        try:
+            meta_mgr = MetadataManager()
+            repair_mgr = RepairManager(meta_mgr)
+            await repair_mgr.repair_manifest(manifest_name, redundancy_target=5, progress_cb=progress_cb)
+        except Exception as e:
+            print(f"Repair error: {e}")
+            TASKS[task_id]["status"] = "error"
+            TASKS[task_id]["message"] = f"Error: {str(e)}"
+
+    asyncio.create_task(background_repair())
+
+    return web.json_response({
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Repair started"
+    })
 
 
 async def get_network_graph(request):
@@ -432,6 +481,7 @@ def start_web_server(port=8888):
         web.post('/api/upload', upload_file),
         web.get('/api/progress/{task_id}', get_progress),
         web.post('/api/download', download_file),
+        web.post('/api/repair', repair_file),
         web.get('/api/network', get_network_graph),
         web.static('/downloads', 'downloads'),
     ])

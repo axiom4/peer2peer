@@ -21,8 +21,8 @@ class MetadataManager:
             "chunks": [
                 {
                     "index": c["index"],
-                    "id": c["id"]
-                    # Locations removed for anonymity/decentralization
+                    "id": c["id"],
+                    "locations": c.get("locations", [])
                 } for c in chunks_info
             ]
         }
@@ -35,3 +35,17 @@ class MetadataManager:
     def load_manifest(self, manifest_path: str) -> dict:
         with open(manifest_path, 'r') as f:
             return json.load(f)
+
+    def update_manifest_chunks(self, filename: str, chunks: list):
+        """Updates just the chunks section of an existing manifest (e.g. after repair)."""
+        manifest_path = os.path.join(self.manifest_dir, f"{filename}.manifest")
+        if not os.path.exists(manifest_path):
+            return
+
+        with open(manifest_path, 'r') as f:
+            data = json.load(f)
+
+        data['chunks'] = chunks
+
+        with open(manifest_path, 'w') as f:
+            json.dump(data, f, indent=4)

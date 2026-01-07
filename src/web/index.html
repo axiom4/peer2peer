@@ -133,9 +133,10 @@
                         <span class="badge bg-light text-secondary border">${size}</span>
                     </div>
                     <div class="btn-group ms-2">
-                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${cleanName}')">Map</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')">Download</button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${cleanName}')">Delete</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${cleanName}')" title="View Map">Map</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')" title="Download">Get</button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="repairFile('${cleanName}')" title="Check Health & Repair">Fix</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${cleanName}')" title="Delete">Del</button>
                     </div>
                 `;
             list.appendChild(li);
@@ -330,6 +331,72 @@
           }
         } catch (e) {
           alert("Error triggering download");
+        }
+      }
+
+      async function repairFile(manifestName) {
+        if (!confirm(`Run health check and repair on ${manifestName}?`)) return;
+
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.innerHTML = `
+            <div class="progress mb-2" style="height: 25px;">
+                <div id="repairBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning text-dark" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+            </div>
+            <div id="repairStatusText" class="text-muted small">Initiating repair...</div>
+        `;
+
+        try {
+          const res = await fetch("/api/repair", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ manifest: manifestName }),
+          });
+          const result = await res.json();
+
+          if (result.status === "processing" && result.task_id) {
+            const taskId = result.task_id;
+            const progressBar = document.getElementById("repairBar");
+            const statusText = document.getElementById("repairStatusText");
+
+            const pollInterval = setInterval(async () => {
+              try {
+                const r = await fetch(`/api/progress/${taskId}`);
+                const task = await r.json();
+
+                if (task.status === "completed") {
+                  clearInterval(pollInterval);
+                  if (progressBar) {
+                    progressBar.style.width = "100%";
+                    progressBar.innerText = "Done";
+                    progressBar.classList.remove("progress-bar-animated");
+                    progressBar.classList.add("bg-success", "text-white");
+                    progressBar.classList.remove("bg-warning", "text-dark");
+                  }
+                  if (statusText) statusText.innerText = task.message;
+
+                  loadManifests(); // refresh if locations changed
+                  setTimeout(() => {
+                    statusDiv.innerHTML = "";
+                  }, 5000);
+                } else if (task.status === "error") {
+                  clearInterval(pollInterval);
+                  statusDiv.innerHTML = `<div class="alert alert-danger">${task.message}</div>`;
+                } else {
+                  if (progressBar) {
+                    progressBar.style.width = task.percent + "%";
+                    progressBar.innerText = task.percent + "%";
+                  }
+                  if (statusText) statusText.innerText = task.message;
+                }
+              } catch (e) {
+                console.error(e);
+              }
+            }, 1000);
+          } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Failed to start repair: ${result.message}</div>`;
+          }
+        } catch (e) {
+          statusDiv.innerHTML = `<div class="alert alert-danger">Network Error</div>`;
         }
       }
 
