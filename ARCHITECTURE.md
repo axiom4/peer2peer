@@ -215,6 +215,42 @@ Unicast response from a node that holds the requested chunk.
 | **GET**  | `/status`     | **Health**. Node stats (peers count, storage usage).   |
 | **GET**  | `/openapi`    | **Spec**. Returns full Swagger/OpenAPI 3.0 definition. |
 
+### Protocol Interaction Diagram
+
+The following diagram illustrates the detailed message flow between nodes for discovery and data exchange.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant NodeA as 🖥️ Node A (Requester)
+    participant Broad as 📣 Broadcast (UDP:9999)
+    participant NodeB as 🖥️ Node B (Holder)
+    participant NodeC as 🖥️ Node C (Other Peer)
+
+    Note over NodeA, NodeC: 1. Peer Discovery (Heartbeat)
+    NodeA->>Broad: HELLO {port: 8000}
+    Broad-->>NodeB: Receive HELLO
+    Broad-->>NodeC: Receive HELLO
+    NodeB->>NodeB: Update Peer List (Add A)
+    NodeC->>NodeC: Update Peer List (Add A)
+
+    Note over NodeA, NodeC: 2. Content Discovery (Search)
+    NodeA->>Broad: QUERY_CHUNK {id: "hash123"}
+    Broad-->>NodeB: Receive QUERY
+    Broad-->>NodeC: Receive QUERY
+
+    NodeC->>NodeC: Check Storage (Miss)
+    NodeB->>NodeB: Check Storage (Hit)
+    
+    NodeB->>NodeA: I_HAVE {url: "http://NodeB:8001"} (Unicast)
+
+    Note over NodeA, NodeC: 3. Data Transfer (Reliable HTTP)
+    NodeA->>NodeB: GET /chunk/hash123
+    activate NodeB
+    NodeB-->>NodeA: 200 OK (Binary Stream)
+    deactivate NodeB
+```
+
 ---
 
 ## 5. Network Topology & Discovery
