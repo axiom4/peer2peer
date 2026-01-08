@@ -179,13 +179,23 @@ async def download_file(request):
     if not manifest_name:
         return web.json_response({"status": "error", "message": "No manifest specified"}, status=400)
 
-    # Auto-append extension if missing
-    if not manifest_name.endswith('.manifest'):
+    # Check if input is a Manifest ID (64 char hex)
+    is_id = len(manifest_name) == 64 and all(c in '0123456789abcdefABCDEF' for c in manifest_name)
+
+    # Auto-append extension only if it's NOT an ID
+    if not is_id and not manifest_name.endswith('.manifest'):
         manifest_name += '.manifest'
 
-    output_name = data.get(
-        'output_name', manifest_name.replace('.manifest', ''))
-    manifest_path = os.path.join('manifests', manifest_name)
+    # Determine paths
+    if is_id:
+        manifest_path = manifest_name # Pass ID directly
+        # Default output name if not provided
+        default_out = f"download_{manifest_name[:8]}"
+        output_name = data.get('output_name', default_out)
+    else:
+        output_name = data.get('output_name', manifest_name.replace('.manifest', ''))
+        manifest_path = os.path.join('manifests', manifest_name)
+
     output_path = os.path.join('downloads', output_name)
     os.makedirs('downloads', exist_ok=True)
 
@@ -569,6 +579,7 @@ async def stream_download(request):
 
     try:
         for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data, compression_mode=compression_mode):
+            await response.write(chunk_data)
     except Exception as e:
         print(f"Streaming error: {e}")
 

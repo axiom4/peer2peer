@@ -342,7 +342,22 @@ def distribute(args, progress_callback=None):
     manifest_path = meta_mgr.save_manifest(
         os.path.basename(file_path), key, chunks_info_for_manifest, compression=use_compression)
 
-    msg = f"Distribution completed successfully! Manifest: {os.path.basename(manifest_path)}"
+    # --- Distribute Manifest (Cloud) ---
+    print("Uploading Manifest to Network...")
+    with open(manifest_path, 'rb') as f:
+        manifest_bytes = f.read()
+
+    manifest_id = hashlib.sha256(manifest_bytes).hexdigest()
+    try:
+        distributor.distribute_chunk(manifest_id, manifest_bytes)
+        print(f"✅ Manifest Distributed: {manifest_id}")
+        print(f"   (Share this ID to download the file directly)")
+    except Exception as e:
+        print(f"⚠️  Failed to distribute manifest: {e}")
+        manifest_id = "UPLOAD_FAILED"
+    # -----------------------------------
+
+    msg = f"Success! Manifest ID: {manifest_id} | File: {os.path.basename(manifest_path)}"
     print(msg)
     if progress_callback:
         progress_callback(100, msg)
@@ -430,24 +445,45 @@ def collect_chunks_data(manifest, distributor, progress_callback=None):
 
 def reconstruct(args, progress_callback=None, stream=False):
     """Recovery/reconstruction logic."""
-    manifest_path = args.manifest
+    manifest_source = args.manifest
     output_path = args.output
 
-    if not os.path.exists(manifest_path):
-        raise FileNotFoundError(f"Error: Manifest {manifest_path} not found.")
-
-    if progress_callback:
-        progress_callback(5, "Loading manifest...")
-
-    meta_mgr = MetadataManager()
-    manifest = meta_mgr.load_manifest(manifest_path)
-
+    # 1. Prepare Network (Moved up to support Manifest Download)
     try:
         nodes = prepare_network_for_reconstruct(args, progress_callback)
     except RuntimeError:
         return None
-
+    
     distributor = DistributionStrategy(nodes)
+    meta_mgr = MetadataManager()
+    manifest_path = manifest_source
+
+    # 2. Manifest Resolution (File or Network ID)
+    if not os.path.exists(manifest_source):
+        # Check if it looks like a valid SHA256 ID
+        if len(manifest_source) == 64 and all(c in '0123456789abcdefABCDEF' for c in manifest_source):
+            print(f"Detected Manifest ID. Downloading {manifest_source}...")
+            if progress_callback:
+                progress_callback(2, "Downloading Manifest...")
+            try:
+                manifest_data = distributor.retrieve_chunk(manifest_source)
+                # Create 'manifests' folder if missing (should exist from MetadataManager but safer)
+                if not os.path.exists("manifests"):
+                    os.makedirs("manifests")
+                
+                manifest_path = os.path.join("manifests", f"downloaded_{manifest_source}.manifest")
+                with open(manifest_path, 'wb') as f:
+                    f.write(manifest_data)
+                print(f"✅ Manifest downloaded to: {manifest_path}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to download manifest {manifest_source}: {e}")
+        else:
+            raise FileNotFoundError(f"Error: Manifest {manifest_source} not found.")
+
+    if progress_callback:
+        progress_callback(5, "Loading manifest...")
+
+    manifest = meta_mgr.load_manifest(manifest_path)
     key = manifest['key'].encode('utf-8')
     shard_mgr = ShardManager(key)
     compression_mode = manifest.get('compression', None)
