@@ -50,7 +50,7 @@ class P2PServer:
             web.get('/status', self.handle_status),
             web.get('/openapi', self.handle_openapi),
             web.post('/unjoin', self.handle_unjoin),
-            
+
             # DHT Routes
             web.post('/dht/ping', self.handle_dht_ping),
             web.post('/dht/find_node', self.handle_dht_find_node),
@@ -87,7 +87,8 @@ class P2PServer:
     async def handle_dht_store(self, request):
         try:
             data = await request.json()
-            resp = self.dht.handle_store(data['key'], data['value'], data['sender'])
+            resp = self.dht.handle_store(
+                data['key'], data['value'], data['sender'])
             return web.json_response(resp)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -96,11 +97,11 @@ class P2PServer:
         return os.path.exists(os.path.join(self.storage_dir, chunk_id))
 
     async def handle_start_dht_bootstrap(self):
-         # Bootstrap DHT with current peers
-         peers_list = list(self.peers)
-         if peers_list:
-             logger.info(f"Bootstrapping DHT with {len(peers_list)} peers...")
-             self.dht.bootstrap(peers_list)
+        # Bootstrap DHT with current peers
+        peers_list = list(self.peers)
+        if peers_list:
+            logger.info(f"Bootstrapping DHT with {len(peers_list)} peers...")
+            self.dht.bootstrap(peers_list)
 
     async def start(self):
         # Start UDP Discovery
@@ -117,7 +118,6 @@ class P2PServer:
             self.dht.bootstrap([self.known_peer])
             logger.info(f"Bootstrapped DHT from known peer {self.known_peer}")
 
-
         # Periodic sync with discovery service
         asyncio.create_task(self._sync_discovery())
 
@@ -129,8 +129,8 @@ class P2PServer:
         """Periodically adds peers discovered via UDP to the active peers list."""
         while True:
             # Sync DHT occasionally
-            if len(self.peers) > 0 and random.random() < 0.2: # 20% chance every loop
-                 self.dht.bootstrap(list(self.peers))
+            if len(self.peers) > 0 and random.random() < 0.2:  # 20% chance every loop
+                self.dht.bootstrap(list(self.peers))
 
             # If I already have enough peers, don't actively search for new ones
             if len(self.peers) >= self.max_peers:
@@ -227,20 +227,20 @@ class P2PServer:
         # For HEAD requests (mapping), do not forward request
         if request.method == 'HEAD':
             return web.Response(status=404)
-        
+
         # 2a. DHT Search (New)
         logger.info(f"Chunk {chunk_id} missing. Querying DHT...")
         loop = asyncio.get_event_loop()
         # Run synchronous DHT call in executor
         owner_url = await loop.run_in_executor(None, self.dht.iterative_find_value, chunk_id)
-        
+
         owners = []
         if owner_url:
             logger.info(f"DHT Found owner for {chunk_id}: {owner_url}")
             owners.append(owner_url)
         else:
             logger.info("DHT lookup failed. Falling back to UDP Search...")
-            
+
             # 2b. UDP Search (Fallback)
             results = await udp_search_chunk_owners([chunk_id], timeout=2.0)
             owners = results.get(chunk_id, [])
