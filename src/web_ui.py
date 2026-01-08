@@ -9,14 +9,14 @@ from types import SimpleNamespace
 # Determine imports based on execution context
 try:
     # If running as module or from root
-    from src.main import distribute, reconstruct
+    from src.main import distribute, reconstruct, prune_orphans
     from src.network.discovery import scan_network
     from src.core.repair import RepairManager
     from src.core.metadata import MetadataManager
 except ImportError:
     try:
         # If running from src directory
-        from main import distribute, reconstruct
+        from main import distribute, reconstruct, prune_orphans
         from network.discovery import scan_network
         from core.repair import RepairManager
         from core.metadata import MetadataManager
@@ -25,7 +25,7 @@ except ImportError:
         # Last resort for direct execution
         import sys
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        from src.main import distribute, reconstruct
+        from src.main import distribute, reconstruct, prune_orphans
         from src.network.discovery import scan_network
         from src.core.repair import RepairManager
         from src.core.metadata import MetadataManager
@@ -282,6 +282,18 @@ async def repair_file(request):
         "task_id": task_id,
         "message": "Repair started"
     })
+
+
+async def clean_orphans(request):
+    """API Endpoint to delete orphan chunks."""
+    try:
+        # Run prune in executor to avoid blocking main loop (synchronous file IO)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: prune_orphans(None))
+        return web.json_response({"status": "ok", "message": "Orphan chunks pruned successfully."})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": f"Prune failed: {e}"}, status=500)
+
 
 
 async def get_network_graph(request):
@@ -585,6 +597,7 @@ def start_web_server(port=8888):
         web.get('/api/progress/{task_id}', get_progress),
         web.post('/api/download', download_file),
         web.post('/api/repair', repair_file),
+        web.post('/api/prune', clean_orphans),
         web.get('/api/network', get_network_graph),
         web.static('/downloads', 'downloads'),
     ])

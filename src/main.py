@@ -3,6 +3,7 @@ from network.discovery import scan_network
 import argparse
 import os
 import sys
+import json
 import asyncio
 import hashlib
 import concurrent.futures
@@ -116,6 +117,71 @@ def visualize_network_cmd(args):
         d_id = dst.replace("http://", "").replace(".", "_").replace(":", "_")
         print(f"    {s_id}[{src}] --> {d_id}[{dst}]")
     print("----------------------------------\n")
+
+
+def prune_orphans(args=None):
+    """Deletes chunks that are not referenced by any manifest."""
+    manifests_dir = 'manifests'
+    network_data_dir = 'network_data'
+    
+    if not os.path.exists(manifests_dir):
+        print("No manifests directory found.")
+        return
+
+    # 1. Collect Valid Chunk IDs
+    valid_chunks = set()
+    if os.path.exists(manifests_dir):
+        manifest_files = [f for f in os.listdir(manifests_dir) if f.endswith('.manifest')]
+        print(f"Scanning {len(manifest_files)} manifests...")
+        
+        for mf in manifest_files:
+            path = os.path.join(manifests_dir, mf)
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    for chunk in data.get('chunks', []):
+                        valid_chunks.add(chunk['id'])
+            except Exception as e:
+                print(f"Error reading manifest {mf}: {e}")
+
+    print(f"Found {len(valid_chunks)} unique valid chunks referenced.")
+
+    # 2. Scan Node Data Directories
+    deleted_count = 0
+    reclaimed_space = 0
+    
+    if not os.path.exists(network_data_dir):
+        print(f"No {network_data_dir} found. Nothing to prune.")
+        return
+
+    for node_dir in os.listdir(network_data_dir):
+        node_path = os.path.join(network_data_dir, node_dir)
+        if not os.path.isdir(node_path):
+            continue
+            
+        # print(f"Scanning {node_dir}...")
+        for chunk_file in os.listdir(node_path):
+            chunk_path = os.path.join(node_path, chunk_file)
+            if not os.path.isfile(chunk_path):
+                continue
+
+            # Skip hidden files or non-chunk files if any (usually just hex IDs)
+            if chunk_file.startswith('.'):
+                continue
+
+            if chunk_file not in valid_chunks:
+                try:
+                    size = os.path.getsize(chunk_path)
+                    os.remove(chunk_path)
+                    deleted_count += 1
+                    reclaimed_space += size
+                    # print(f"Deleted orphan: {chunk_file} from {node_dir}")
+                except Exception as e:
+                    print(f"Failed to delete {chunk_path}: {e}")
+
+    print(f"Pruning complete.")
+    print(f"Deleted {deleted_count} orphan chunks.")
+    print(f"Reclaimed {reclaimed_space / (1024*1024):.2f} MB.")
 
 
 def start_server(args):
@@ -584,6 +650,9 @@ def main():
         "--entry-node", help="Optional: Node URL for discovery")
     vis_parser.add_argument("--scan", action="store_true",
                             help="Use Auto-Discovery to find network")
+    
+    # Command: PRUNE (Garbage Collection)
+    prune_parser = subparsers.add_parser("prune", help="Delete orphan chunks")
 
     # Command: WEB UI
     web_parser = subparsers.add_parser("web-ui", help="Start Web UI")
@@ -600,6 +669,8 @@ def main():
         reconstruct(args)
     elif args.command == "visualize":
         visualize_network_cmd(args)
+    elif args.command == "prune":
+        prune_orphans(args)
     elif args.command == "web-ui":
         from web_ui import start_web_server
         start_web_server(port=args.port)
