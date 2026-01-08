@@ -154,7 +154,7 @@ async def scan_network(timeout=3):
         remaining = timeout - elapsed
         if remaining <= 0:
             break
-            
+
         sock.settimeout(remaining)
         try:
             data, addr = sock.recvfrom(1024)
@@ -208,7 +208,7 @@ def _udp_search_sync(chunk_ids, timeout):
         remaining = timeout - elapsed
         if remaining <= 0:
             break
-            
+
         sock.settimeout(remaining)
         try:
             data, addr = sock.recvfrom(4096)
@@ -217,7 +217,7 @@ def _udp_search_sync(chunk_ids, timeout):
             if msg.get("type") == "I_HAVE":
                 cid = msg.get("chunk_id")
                 raw_url = msg.get("url")
-                
+
                 # Normalize URL to use the observed IP address (addr[0])
                 # This ensures consistency with scan_network which uses addr[0]
                 # preventing mismatch between "candidates" and "live_locations"

@@ -34,7 +34,8 @@ class DistributionStrategy:
                     if node.store(chunk_id, data):
                         return node.get_id()
                 except Exception as e:
-                    print(f"Error saving to {node.get_id()} (Attempt {attempt+1}): {e}")
+                    print(
+                        f"Error saving to {node.get_id()} (Attempt {attempt+1}): {e}")
                     time.sleep(0.5)  # Backoff
             return None
 

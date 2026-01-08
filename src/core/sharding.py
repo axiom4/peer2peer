@@ -94,9 +94,9 @@ class ShardManager:
                     data_to_write = decrypted_data
 
                 f.write(data_to_write)
-                
+
                 if progress_cb and i % 5 == 0:
-                   progress_cb(i, total_chunks)
+                    progress_cb(i, total_chunks)
 
     def yield_reconstructed_chunks(self, chunks: List[Dict[str, any]]) -> Generator[bytes, None, None]:
         """

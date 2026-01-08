@@ -242,7 +242,8 @@ class DHT:
                             "sender": self._my_info()
                         }, timeout=1) as resp:
                             data = await resp.json()
-                            found_nodes = [Peer.from_dict(d) for d in data["nodes"]]
+                            found_nodes = [Peer.from_dict(
+                                d) for d in data["nodes"]]
                             for n in found_nodes:
                                 if n.id.hex() not in [p.id.hex() for p in shortlist]:
                                     shortlist.append(n)
@@ -289,7 +290,8 @@ class DHT:
                                 if n.id.hex() not in [p.id.hex() for p in shortlist]:
                                     shortlist.append(n)
 
-                            shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
+                            shortlist.sort(
+                                key=lambda p: p.id.xor_distance(target_id))
                             shortlist = shortlist[:K_BUCKET_SIZE]
 
                     except:

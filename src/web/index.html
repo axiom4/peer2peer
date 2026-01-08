@@ -149,8 +149,8 @@
       }
 
       function streamDownload(manifestName) {
-         if (!confirm(`Stream download ${manifestName} directly? This depends on your browser to save the file.`)) return;
-         window.location.href = `/api/stream/${manifestName}`;
+        if (!confirm(`Stream download ${manifestName} directly? This depends on your browser to save the file.`)) return;
+        window.location.href = `/api/stream/${manifestName}`;
       }
 
       async function deleteManifest(name) {
@@ -310,7 +310,7 @@
         // if (!confirm(`Download file from ${manifestName}?`)) return;
         try {
           const statusDiv = document.getElementById("uploadStatus"); // Reusing status div
-          
+
           // Show progress bar
           statusDiv.innerHTML = `
             <div class="progress mb-2" style="height: 25px;">
@@ -325,57 +325,57 @@
             body: JSON.stringify({ manifest: manifestName }),
           });
           const result = await res.json();
-          
+
           if (result.status === "processing" && result.task_id) {
-              const taskId = result.task_id;
-              const progressBar = document.getElementById("downloadBar");
-              const statusText = document.getElementById("downloadStatusText");
-              
-              const pollInterval = setInterval(async () => {
-                  try {
-                      const r = await fetch(`/api/progress/${taskId}`);
-                      const task = await r.json();
-                      
-                      if (task.status === "completed") {
-                          clearInterval(pollInterval);
-                          if (progressBar) {
-                              progressBar.style.width = "100%";
-                              progressBar.innerText = "Ready";
-                              progressBar.classList.remove("progress-bar-animated");
-                              progressBar.classList.add("bg-success", "text-white");
-                          }
-                          statusDiv.innerHTML = `<div class="alert alert-success">Download ready!</div>`;
-                          
-                          // Trigger browser download if URL provided
-                          if (task.download_url) {
-                            const a = document.createElement("a");
-                            a.href = task.download_url;
-                            a.download = manifestName.replace(".manifest", "");
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }
-                          
-                          setTimeout(() => { statusDiv.innerHTML = ""; }, 3000);
-                          
-                      } else if (task.status === "error") {
-                          clearInterval(pollInterval);
-                           statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
-                      } else {
-                          // Update progress
-                          if (progressBar) {
-                              progressBar.style.width = task.percent + "%";
-                              progressBar.innerText = task.percent + "%";
-                          }
-                          if (statusText) statusText.innerText = task.message;
-                      }
-                  } catch(e) {
-                      console.error("Polling error", e);
+            const taskId = result.task_id;
+            const progressBar = document.getElementById("downloadBar");
+            const statusText = document.getElementById("downloadStatusText");
+
+            const pollInterval = setInterval(async () => {
+              try {
+                const r = await fetch(`/api/progress/${taskId}`);
+                const task = await r.json();
+
+                if (task.status === "completed") {
+                  clearInterval(pollInterval);
+                  if (progressBar) {
+                    progressBar.style.width = "100%";
+                    progressBar.innerText = "Ready";
+                    progressBar.classList.remove("progress-bar-animated");
+                    progressBar.classList.add("bg-success", "text-white");
                   }
-              }, 1000);
-              
+                  statusDiv.innerHTML = `<div class="alert alert-success">Download ready!</div>`;
+
+                  // Trigger browser download if URL provided
+                  if (task.download_url) {
+                    const a = document.createElement("a");
+                    a.href = task.download_url;
+                    a.download = manifestName.replace(".manifest", "");
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }
+
+                  setTimeout(() => {
+                    statusDiv.innerHTML = "";
+                  }, 3000);
+                } else if (task.status === "error") {
+                  clearInterval(pollInterval);
+                  statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
+                } else {
+                  // Update progress
+                  if (progressBar) {
+                    progressBar.style.width = task.percent + "%";
+                    progressBar.innerText = task.percent + "%";
+                  }
+                  if (statusText) statusText.innerText = task.message;
+                }
+              } catch (e) {
+                console.error("Polling error", e);
+              }
+            }, 1000);
           } else if (result.status === "ok" && result.download_url) {
-             // Legacy/Fast path (if sync)
+            // Legacy/Fast path (if sync)
             statusDiv.innerHTML = `<div class="alert alert-success">Download started!</div>`;
 
             // Trigger browser download
@@ -466,143 +466,144 @@
 
       // --- Upload ---
       const uploadForm = document.getElementById("uploadForm");
-      if (uploadForm) uploadForm.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const input = document.getElementById("fileInput");
-        if (!input.files[0]) return;
+      if (uploadForm)
+        uploadForm.addEventListener("submit", (e) => {
+          e.preventDefault();
+          const input = document.getElementById("fileInput");
+          if (!input.files[0]) return;
 
-        const file = input.files[0];
-        const replicas = document.getElementById("replicasInput").value || 5;
-        const compression = document.getElementById("compressionCheck").checked;
+          const file = input.files[0];
+          const replicas = document.getElementById("replicasInput").value || 5;
+          const compression = document.getElementById("compressionCheck").checked;
 
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("redundancy", replicas);
-        formData.append("compression", compression);
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("redundancy", replicas);
+          formData.append("compression", compression);
 
-        const statusDiv = document.getElementById("uploadStatus");
-        // Reset status with a progress bar
-        statusDiv.innerHTML = `
+          const statusDiv = document.getElementById("uploadStatus");
+          // Reset status with a progress bar
+          statusDiv.innerHTML = `
             <div class="progress mb-2" style="height: 25px;">
                 <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
             </div>
             <div id="statusText" class="text-muted small">Starting upload...</div>
         `;
 
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/upload", true);
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/upload", true);
 
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            const progressBar = document.getElementById("progressBar");
-            const statusText = document.getElementById("statusText");
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const percent = Math.round((event.loaded / event.total) * 100);
+              const progressBar = document.getElementById("progressBar");
+              const statusText = document.getElementById("statusText");
 
-            // UX: Map Upload (0-100%) to first 40% of total progress bar
-            // This reserves 60% for the server-side distribution/processing
-            const visualPercent = Math.round(percent * 0.4);
+              // UX: Map Upload (0-100%) to first 40% of total progress bar
+              // This reserves 60% for the server-side distribution/processing
+              const visualPercent = Math.round(percent * 0.4);
 
-            if (progressBar) {
-              progressBar.style.width = visualPercent + "%";
-              progressBar.innerText = visualPercent + "%";
-              progressBar.setAttribute("aria-valuenow", visualPercent);
-            }
-
-            if (statusText) {
-              if (percent < 100) {
-                statusText.innerText = `Uploading: ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
-              } else {
-                statusText.innerText = "Upload complete. Sending to server...";
+              if (progressBar) {
+                progressBar.style.width = visualPercent + "%";
+                progressBar.innerText = visualPercent + "%";
+                progressBar.setAttribute("aria-valuenow", visualPercent);
               }
-            }
-          }
-        };
 
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            try {
-              const result = JSON.parse(xhr.responseText);
-
-              if (result.status === "processing" && result.task_id) {
-                // Start polling for progress
-                const taskId = result.task_id;
-                const progressBar = document.getElementById("progressBar");
-                const statusText = document.getElementById("statusText");
-
-                // Switch visual style to indicate phase change
-                if (progressBar) {
-                  progressBar.classList.remove("bg-primary");
-                  progressBar.classList.add("bg-success", "progress-bar-striped", "progress-bar-animated");
+              if (statusText) {
+                if (percent < 100) {
+                  statusText.innerText = `Uploading: ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
+                } else {
+                  statusText.innerText = "Upload complete. Sending to server...";
                 }
-
-                const pollInterval = setInterval(async () => {
-                  try {
-                    const res = await fetch(`/api/progress/${taskId}`);
-                    const task = await res.json();
-
-                    if (task.status === "completed") {
-                      clearInterval(pollInterval);
-
-                      // Make sure bar is at 100%
-                      if (progressBar) {
-                        progressBar.style.width = "100%";
-                        progressBar.innerText = "100%";
-                        progressBar.setAttribute("aria-valuenow", 100);
-                        progressBar.classList.remove("progress-bar-animated");
-                      }
-                      if (statusText) {
-                        statusText.className = "text-success fw-bold";
-                        statusText.innerText = "Distribution Completed Successfully!";
-                      }
-
-                      loadManifests();
-
-                      // Auto-hide after 3 seconds
-                      setTimeout(() => {
-                        statusDiv.innerHTML = "";
-                      }, 3000);
-                    } else if (task.status === "error") {
-                      clearInterval(pollInterval);
-                      statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
-                    } else {
-                      // Update progress
-                      if (progressBar) {
-                        let p = task.percent;
-                        // Map Distribution (0-100%) to remaining 60% of total bar (40 -> 100)
-                        let visualP = 40 + Math.round(p * 0.6);
-
-                        progressBar.style.width = visualP + "%";
-                        progressBar.innerText = visualP + "%";
-                        progressBar.setAttribute("aria-valuenow", visualP);
-                      }
-                      if (statusText) {
-                        statusText.innerText = task.message;
-                      }
-                    }
-                  } catch (e) {
-                    console.error("Polling error", e);
-                  }
-                }, 500);
-              } else if (result.status === "ok") {
-                statusDiv.innerHTML = `<div class="alert alert-success">${result.message}</div>`;
-                loadManifests(); // Refresh list
-              } else {
-                statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
               }
-            } catch (e) {
-              statusDiv.innerHTML = `<div class="alert alert-danger">Invalid server response</div>`;
             }
-          } else {
-            statusDiv.innerHTML = `<div class="alert alert-danger">Upload Failed (Status ${xhr.status})</div>`;
-          }
-        };
+          };
 
-        xhr.onerror = () => {
-          statusDiv.innerHTML = `<div class="alert alert-danger">Network Error during upload</div>`;
-        };
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              try {
+                const result = JSON.parse(xhr.responseText);
 
-        xhr.send(formData);
-      });
+                if (result.status === "processing" && result.task_id) {
+                  // Start polling for progress
+                  const taskId = result.task_id;
+                  const progressBar = document.getElementById("progressBar");
+                  const statusText = document.getElementById("statusText");
+
+                  // Switch visual style to indicate phase change
+                  if (progressBar) {
+                    progressBar.classList.remove("bg-primary");
+                    progressBar.classList.add("bg-success", "progress-bar-striped", "progress-bar-animated");
+                  }
+
+                  const pollInterval = setInterval(async () => {
+                    try {
+                      const res = await fetch(`/api/progress/${taskId}`);
+                      const task = await res.json();
+
+                      if (task.status === "completed") {
+                        clearInterval(pollInterval);
+
+                        // Make sure bar is at 100%
+                        if (progressBar) {
+                          progressBar.style.width = "100%";
+                          progressBar.innerText = "100%";
+                          progressBar.setAttribute("aria-valuenow", 100);
+                          progressBar.classList.remove("progress-bar-animated");
+                        }
+                        if (statusText) {
+                          statusText.className = "text-success fw-bold";
+                          statusText.innerText = "Distribution Completed Successfully!";
+                        }
+
+                        loadManifests();
+
+                        // Auto-hide after 3 seconds
+                        setTimeout(() => {
+                          statusDiv.innerHTML = "";
+                        }, 3000);
+                      } else if (task.status === "error") {
+                        clearInterval(pollInterval);
+                        statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
+                      } else {
+                        // Update progress
+                        if (progressBar) {
+                          let p = task.percent;
+                          // Map Distribution (0-100%) to remaining 60% of total bar (40 -> 100)
+                          let visualP = 40 + Math.round(p * 0.6);
+
+                          progressBar.style.width = visualP + "%";
+                          progressBar.innerText = visualP + "%";
+                          progressBar.setAttribute("aria-valuenow", visualP);
+                        }
+                        if (statusText) {
+                          statusText.innerText = task.message;
+                        }
+                      }
+                    } catch (e) {
+                      console.error("Polling error", e);
+                    }
+                  }, 500);
+                } else if (result.status === "ok") {
+                  statusDiv.innerHTML = `<div class="alert alert-success">${result.message}</div>`;
+                  loadManifests(); // Refresh list
+                } else {
+                  statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
+                }
+              } catch (e) {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Invalid server response</div>`;
+              }
+            } else {
+              statusDiv.innerHTML = `<div class="alert alert-danger">Upload Failed (Status ${xhr.status})</div>`;
+            }
+          };
+
+          xhr.onerror = () => {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Network Error during upload</div>`;
+          };
+
+          xhr.send(formData);
+        });
 
       // --- Graph ---
       let network = null;

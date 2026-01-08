@@ -495,11 +495,11 @@ async def delete_manifest(request):
 async def stream_download(request):
     """Streams a file directly to the client without saving to disk."""
     manifest_name = request.match_info['name']
-    
+
     # Auto-append extension if missing
     if not manifest_name.endswith('.manifest'):
         manifest_name += '.manifest'
-        
+
     manifest_path = os.path.join('manifests', manifest_name)
     if not os.path.exists(manifest_path):
         return web.Response(status=404, text="Manifest not found")
@@ -508,7 +508,8 @@ async def stream_download(request):
     try:
         with open(manifest_path, 'r') as f:
             manifest_data = json.load(f)
-            original_filename = manifest_data.get('filename', 'downloaded_file')
+            original_filename = manifest_data.get(
+                'filename', 'downloaded_file')
     except:
         original_filename = 'downloaded_file'
 
@@ -522,19 +523,19 @@ async def stream_download(request):
     )
 
     loop = asyncio.get_event_loop()
-    
+
     try:
         # Run blocking reconstruction in thread pool to avoid blocking the event loop
         result = await loop.run_in_executor(
-            None, 
+            None,
             lambda: reconstruct(args, progress_callback=None, stream=True)
         )
-        
+
         if not result:
-             return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
-             
+            return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
+
         shard_mgr, chunks_data = result
-        
+
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {str(e)}")
 
@@ -550,11 +551,11 @@ async def stream_download(request):
     try:
         for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data):
             await response.write(chunk_data)
-        
+
         await response.write_eof()
     except Exception as e:
         print(f"Streaming error: {e}")
-        
+
     return response
 
 

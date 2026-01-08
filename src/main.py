@@ -334,7 +334,7 @@ def collect_chunks_data(manifest, distributor, progress_callback=None):
             return None, f"Chunk {chunk_info['index']} Fetch Error: {e}"
 
     print(f"Starting parallel upload (max 10 workers)...")
-    
+
     total_chunks = len(manifest['chunks'])
     completed_chunks = 0
 
@@ -349,12 +349,13 @@ def collect_chunks_data(manifest, distributor, progress_callback=None):
                 if progress_callback:
                     progress_callback(-1, f"Error: {error}")
                 raise RuntimeError(error)
-            
+
             chunks_data.append(result)
             completed_chunks += 1
             if progress_callback:
                 pct = 15 + int((completed_chunks / total_chunks) * 75)
-                progress_callback(pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
+                progress_callback(
+                    pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
 
     chunks_data.sort(key=lambda x: x['index'])
     return chunks_data
@@ -384,7 +385,8 @@ def reconstruct(args, progress_callback=None, stream=False):
     shard_mgr = ShardManager(key)
 
     try:
-        chunks_data = collect_chunks_data(manifest, distributor, progress_callback)
+        chunks_data = collect_chunks_data(
+            manifest, distributor, progress_callback)
     except RuntimeError:
         return None
 
@@ -398,12 +400,14 @@ def reconstruct(args, progress_callback=None, stream=False):
     def reassembly_monitor(done_chunks, total):
         if progress_callback:
             pct = 90 + int((done_chunks/total) * 10)
-            progress_callback(pct, f"Reassembling: {int((done_chunks/total)*100)}%")
+            progress_callback(
+                pct, f"Reassembling: {int((done_chunks/total)*100)}%")
 
-    shard_mgr.reconstruct_file(chunks_data, output_path, progress_cb=reassembly_monitor)
+    shard_mgr.reconstruct_file(
+        chunks_data, output_path, progress_cb=reassembly_monitor)
 
     print(f"File reconstructed: {output_path}")
-    
+
     if progress_callback:
         progress_callback(100, "Download and reconstruction complete!")
 
@@ -411,7 +415,7 @@ def reconstruct(args, progress_callback=None, stream=False):
     # ... (Keep existing verify logic from original code, omitted here for brevity if it was outside this function block in tool usage)
     # The previous editing tool snapshot suggests we are overwriting reconstruct completely.
     # I need to ensure I don't delete the Merkle check at the end.
-    
+
     # Restoring Merkle Check logic manually since I'm overwriting the function
     expected_root = manifest.get('merkle_root')
     if expected_root:
@@ -422,7 +426,6 @@ def reconstruct(args, progress_callback=None, stream=False):
             print("✅ INTEGRITY CHECK PASSED")
         else:
             print("❌ INTEGRITY CHECK FAILED")
-
 
     key = manifest['key'].encode('utf-8')
     shard_mgr = ShardManager(key)
@@ -455,7 +458,7 @@ def reconstruct(args, progress_callback=None, stream=False):
             return None, f"  -> FATAL ERROR Chunk {chunk_info['index']}: {e}"
 
     print(f"Starting parallel upload (max 20 workers)...")
-    
+
     total_chunks = len(manifest['chunks'])
     completed_chunks = 0
 
@@ -474,12 +477,13 @@ def reconstruct(args, progress_callback=None, stream=False):
                     executor.shutdown(wait=False, cancel_futures=True)
                     return
                 chunks_data.append(result)
-                
+
                 completed_chunks += 1
                 if progress_callback:
                     # Map progress from 15% to 90%
                     pct = 15 + int((completed_chunks / total_chunks) * 75)
-                    progress_callback(pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
+                    progress_callback(
+                        pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
 
         # Important: reorder chunks before rebuilding!
         chunks_data.sort(key=lambda x: x['index'])
@@ -491,13 +495,15 @@ def reconstruct(args, progress_callback=None, stream=False):
             if progress_callback:
                 # Map progress from 90% to 100%
                 pct = 90 + int((done_chunks/total) * 10)
-                progress_callback(pct, f"Reassembling: {int((done_chunks/total)*100)}%")
+                progress_callback(
+                    pct, f"Reassembling: {int((done_chunks/total)*100)}%")
 
         # Reassemble the file
-        shard_mgr.reconstruct_file(chunks_data, output_path, progress_cb=reassembly_monitor)
+        shard_mgr.reconstruct_file(
+            chunks_data, output_path, progress_cb=reassembly_monitor)
 
         print(f"File reconstructed: {output_path}")
-        
+
         if progress_callback:
             progress_callback(100, "Download and reconstruction complete!")
 

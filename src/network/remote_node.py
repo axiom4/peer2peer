@@ -13,7 +13,8 @@ class RemoteHttpNode(StorageNode):
         self._online = True  # Assume online, store/retrieve will verify
         self.session = requests.Session()
         # Tune connection pool
-        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=100)
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10, pool_maxsize=100)
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
 
@@ -75,11 +76,12 @@ class RemoteHttpNode(StorageNode):
         try:
             url = f"{self.url}/chunk/{chunk_id}"
             resp = self.session.get(url, timeout=10)
-            
+
             if resp.status_code == 200:
                 return resp.content
             elif resp.status_code == 404:
-                raise FileNotFoundError(f"Chunk {chunk_id} not found on {self.url}")
+                raise FileNotFoundError(
+                    f"Chunk {chunk_id} not found on {self.url}")
             else:
                 raise Exception(f"Status {resp.status_code}")
         except Exception as e:
