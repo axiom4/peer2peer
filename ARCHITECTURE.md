@@ -241,7 +241,7 @@ sequenceDiagram
 
     NodeC->>NodeC: Check Storage (Miss)
     NodeB->>NodeB: Check Storage (Hit)
-    
+
     NodeB->>NodeA: I_HAVE {url: "http://NodeB:8001"} (Unicast)
 
     Note over NodeA, NodeC: 3. Data Transfer (Reliable HTTP)
