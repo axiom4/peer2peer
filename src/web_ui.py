@@ -554,7 +554,7 @@ async def stream_download(request):
             return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
 
         shard_mgr, chunks_data, compression_mode = result
-        
+
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {str(e)}")
 

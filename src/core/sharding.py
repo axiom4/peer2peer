@@ -85,7 +85,7 @@ class ShardManager:
                     # Explicitly disabled compression
                     data_to_write = decrypted_data
                 elif compression_mode is True:
-                     # Explicitly enabled compression (Zlib)
+                    # Explicitly enabled compression (Zlib)
                     try:
                         data_to_write = zlib.decompress(decrypted_data)
                     except zlib.error:
@@ -94,7 +94,7 @@ class ShardManager:
                             data_to_write = lzma.decompress(decrypted_data)
                         except lzma.LZMAError:
                             # Failed both, maybe it wasn't compressed?
-                             data_to_write = decrypted_data
+                            data_to_write = decrypted_data
                 else:
                     # Legacy Auto-Detect
                     try:
