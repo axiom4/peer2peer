@@ -157,7 +157,7 @@ graph TD
    Client -.->|"2. UDP Broadcast (Fallback)"| N2
    Client -.->|Timeout| N3
    Client -->|"3. Download (HTTP)"| N4
-   
+
    Note["Hybrid Discovery: DHT + UDP"]
 ```
 
@@ -198,16 +198,16 @@ Nodes maintain a routing table for efficient lookups.
 
 **Endpoints:**
 
-| Method   | Endpoint      | Description                                            |
-| :------- | :------------ | :----------------------------------------------------- |
-| **GET**  | `/chunks`     | **Inventory**. Returns list of all stored chunk IDs.   |
-| **GET**  | `/chunk/{id}` | **Download**. Stream the binary content of the chunk.  |
-| **PUT**  | `/chunk/{id}` | **Upload/Replicate**. Save a chunk to this node.       |
-| **POST** | `/dht/store`  | **DHT**. Store key-value pair.                         |
-| **POST** | `/dht/find_value`| **DHT**. Find providers for value.                   |
-| **POST** | `/unjoin`     | **Leave**. Trigger graceful exit and data offload.     |
-| **GET**  | `/status`     | **Health**. Node stats.                                |
-| **GET**  | `/openapi`    | **Spec**. Returns full Swagger/OpenAPI 3.0 definition. |
+| Method   | Endpoint          | Description                                            |
+| :------- | :---------------- | :----------------------------------------------------- |
+| **GET**  | `/chunks`         | **Inventory**. Returns list of all stored chunk IDs.   |
+| **GET**  | `/chunk/{id}`     | **Download**. Stream the binary content of the chunk.  |
+| **PUT**  | `/chunk/{id}`     | **Upload/Replicate**. Save a chunk to this node.       |
+| **POST** | `/dht/store`      | **DHT**. Store key-value pair.                         |
+| **POST** | `/dht/find_value` | **DHT**. Find providers for value.                     |
+| **POST** | `/unjoin`         | **Leave**. Trigger graceful exit and data offload.     |
+| **GET**  | `/status`         | **Health**. Node stats.                                |
+| **GET**  | `/openapi`        | **Spec**. Returns full Swagger/OpenAPI 3.0 definition. |
 
 ### Protocol Interaction Diagram
 
@@ -241,7 +241,6 @@ sequenceDiagram
     NodeB-->>NodeA: 200 OK (Binary Stream)
     deactivate NodeB
 ```
-
 
 ---
 
