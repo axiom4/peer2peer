@@ -295,7 +295,6 @@ async def clean_orphans(request):
         return web.json_response({"status": "error", "message": f"Prune failed: {e}"}, status=500)
 
 
-
 async def get_network_graph(request):
     try:
         # 1. Initial Discovery

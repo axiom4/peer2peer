@@ -176,19 +176,19 @@
 
       async function pruneOrphans() {
         if (!confirm("Delete all orphan chunks (chunks not referenced by any manifest)? This frees up space but is irreversible.")) return;
-         try {
-           const res = await fetch("/api/prune", { method: "POST" });
-           const result = await res.json();
-           if(res.ok) {
-             alert(result.message);
-           } else {
-             alert("Error: " + result.message);
-           }
-         } catch(e) {
-           alert("Network error: " + e);
-         }
+        try {
+          const res = await fetch("/api/prune", { method: "POST" });
+          const result = await res.json();
+          if (res.ok) {
+            alert(result.message);
+          } else {
+            alert("Error: " + result.message);
+          }
+        } catch (e) {
+          alert("Network error: " + e);
+        }
       }
-      
+
       // Global variable to track distribution network instance
       let distNetwork = null;
 

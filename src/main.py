@@ -123,7 +123,7 @@ def prune_orphans(args=None):
     """Deletes chunks that are not referenced by any manifest."""
     manifests_dir = 'manifests'
     network_data_dir = 'network_data'
-    
+
     if not os.path.exists(manifests_dir):
         print("No manifests directory found.")
         return
@@ -131,9 +131,10 @@ def prune_orphans(args=None):
     # 1. Collect Valid Chunk IDs
     valid_chunks = set()
     if os.path.exists(manifests_dir):
-        manifest_files = [f for f in os.listdir(manifests_dir) if f.endswith('.manifest')]
+        manifest_files = [f for f in os.listdir(
+            manifests_dir) if f.endswith('.manifest')]
         print(f"Scanning {len(manifest_files)} manifests...")
-        
+
         for mf in manifest_files:
             path = os.path.join(manifests_dir, mf)
             try:
@@ -149,7 +150,7 @@ def prune_orphans(args=None):
     # 2. Scan Node Data Directories
     deleted_count = 0
     reclaimed_space = 0
-    
+
     if not os.path.exists(network_data_dir):
         print(f"No {network_data_dir} found. Nothing to prune.")
         return
@@ -158,7 +159,7 @@ def prune_orphans(args=None):
         node_path = os.path.join(network_data_dir, node_dir)
         if not os.path.isdir(node_path):
             continue
-            
+
         # print(f"Scanning {node_dir}...")
         for chunk_file in os.listdir(node_path):
             chunk_path = os.path.join(node_path, chunk_file)
@@ -650,7 +651,7 @@ def main():
         "--entry-node", help="Optional: Node URL for discovery")
     vis_parser.add_argument("--scan", action="store_true",
                             help="Use Auto-Discovery to find network")
-    
+
     # Command: PRUNE (Garbage Collection)
     prune_parser = subparsers.add_parser("prune", help="Delete orphan chunks")
 
