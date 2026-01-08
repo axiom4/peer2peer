@@ -148,6 +148,14 @@ async def upload_file(request):
             print(f"Background distribution error: {e}")
             TASKS[task_id]["status"] = "error"
             TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
+        finally:
+            # Clean up uploaded file
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                    print(f"Cleaned up temp file: {temp_path}")
+                except Exception as cleanup_error:
+                    print(f"Error cleaning up temp file: {cleanup_error}")
 
     # Fire and forget (in background task)
     asyncio.create_task(background_distribute())
