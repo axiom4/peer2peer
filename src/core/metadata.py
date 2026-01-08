@@ -1,5 +1,6 @@
 import json
 import os
+from .merkle import MerkleTree
 
 
 class MetadataManager:
@@ -11,11 +12,20 @@ class MetadataManager:
     def save_manifest(self, filename: str, key: bytes, chunks_info: list):
         """Saves the file manifest. This file MUST remain private to the owner."""
 
+        # Ensure chunks are sorted by index for consistent Merkle Root
+        chunks_info.sort(key=lambda x: x["index"])
+
+        # Calculate Merkle Root
+        chunk_ids = [c["id"] for c in chunks_info]
+        merkle_tree = MerkleTree(chunk_ids)
+        merkle_root = merkle_tree.get_root()
+
         # Calculate total size if available in chunks metadata
         total_size = sum(c.get('original_size', 0) for c in chunks_info)
 
         manifest = {
             "filename": filename,
+            "merkle_root": merkle_root,
             "size": total_size,
             "key": key.decode('utf-8'),  # The key is needed to decrypt
             "chunks": [
@@ -45,7 +55,20 @@ class MetadataManager:
         with open(manifest_path, 'r') as f:
             data = json.load(f)
 
+        # Update chunks
         data['chunks'] = chunks
+        
+        # Helper function to get chunk ID safely
+        def get_chunk_id(c):
+             # Handle both dict and object if necessary, assuming dict for now based on usage
+             return c.get('id') if isinstance(c, dict) else c.id
+
+        # Update Merkle Root
+        # Ensure chunks are sorted by index
+        chunks.sort(key=lambda x: x.get('index', 0))
+        chunk_ids = [get_chunk_id(c) for c in chunks]
+        merkle_tree = MerkleTree(chunk_ids)
+        data['merkle_root'] = merkle_tree.get_root()
 
         with open(manifest_path, 'w') as f:
             json.dump(data, f, indent=4)

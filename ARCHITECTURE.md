@@ -41,6 +41,7 @@ The `DistributionStrategy` manages data dispersion:
 At the end of the upload, a `.manifest` (JSON) file is generated on the client side:
 
 - Contains the decryption key (required to read the data).
+- Contains the **Merkle Root** for file integrity verification.
 - Contains the ordered list of chunk hashes.
 - **Privacy**: Does not contain original file names or node IP addresses (location is found dynamically during restore via Network Query).
 
