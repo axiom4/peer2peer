@@ -57,11 +57,10 @@ class ShardManager:
                 yield chunk_info
                 index += 1
 
-    def reconstruct_file(self, chunks: List[Dict[str, any]], output_path: str, progress_cb=None):
+    def reconstruct_file(self, chunks: List[Dict[str, any]], output_path: str, progress_cb=None, compression_mode=None):
         """
         Reconstructs the original file from encrypted chunks.
-        Attempts decompression after decryption.
-        Supports both old B64 and new binary formats.
+        compression_mode: True (force zlib), False (no compression), None (auto-detect fallback)
         """
         # Sort by index for safety
         chunks.sort(key=lambda x: x['index'])
@@ -80,25 +79,42 @@ class ShardManager:
                     token_to_decrypt = raw_data
 
                 decrypted_data = self.crypto.decrypt(token_to_decrypt)
+                data_to_write = decrypted_data
 
-                try:
-                    # Attempt decompression (Auto-detect format)
-                    # First try zlib (fast)
+                if compression_mode is False:
+                    # Explicitly disabled compression
+                    data_to_write = decrypted_data
+                elif compression_mode is True:
+                     # Explicitly enabled compression (Zlib)
                     try:
                         data_to_write = zlib.decompress(decrypted_data)
                     except zlib.error:
-                        # Fallback to lzma (legacy chunks)
-                        data_to_write = lzma.decompress(decrypted_data)
-                except lzma.LZMAError:
-                    # Fallback for old uncompressed chunks (backward compatibility)
-                    data_to_write = decrypted_data
+                        # Fallback to lzma just in case logic mismatched
+                        try:
+                            data_to_write = lzma.decompress(decrypted_data)
+                        except lzma.LZMAError:
+                            # Failed both, maybe it wasn't compressed?
+                             data_to_write = decrypted_data
+                else:
+                    # Legacy Auto-Detect
+                    try:
+                        # Attempt decompression (Auto-detect format)
+                        # First try zlib (fast)
+                        try:
+                            data_to_write = zlib.decompress(decrypted_data)
+                        except zlib.error:
+                            # Fallback to lzma (legacy chunks)
+                            data_to_write = lzma.decompress(decrypted_data)
+                    except lzma.LZMAError:
+                        # Fallback for old uncompressed chunks (backward compatibility)
+                        data_to_write = decrypted_data
 
                 f.write(data_to_write)
 
                 if progress_cb and i % 5 == 0:
                     progress_cb(i, total_chunks)
 
-    def yield_reconstructed_chunks(self, chunks: List[Dict[str, any]]) -> Generator[bytes, None, None]:
+    def yield_reconstructed_chunks(self, chunks: List[Dict[str, any]], compression_mode=None) -> Generator[bytes, None, None]:
         """
         Yields decrypted bytes of the file in order, without writing to disk.
         """
@@ -112,12 +128,25 @@ class ShardManager:
                 token_to_decrypt = raw_data
 
             decrypted_data = self.crypto.decrypt(token_to_decrypt)
-            try:
+            data = decrypted_data
+
+            if compression_mode is False:
+                data = decrypted_data
+            elif compression_mode is True:
                 try:
                     data = zlib.decompress(decrypted_data)
                 except zlib.error:
-                    data = lzma.decompress(decrypted_data)
-            except lzma.LZMAError:
-                data = decrypted_data
+                    try:
+                        data = lzma.decompress(decrypted_data)
+                    except lzma.LZMAError:
+                        data = decrypted_data
+            else:
+                try:
+                    try:
+                        data = zlib.decompress(decrypted_data)
+                    except zlib.error:
+                        data = lzma.decompress(decrypted_data)
+                except lzma.LZMAError:
+                    data = decrypted_data
 
             yield data

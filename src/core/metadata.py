@@ -9,7 +9,7 @@ class MetadataManager:
         if not os.path.exists(self.manifest_dir):
             os.makedirs(self.manifest_dir)
 
-    def save_manifest(self, filename: str, key: bytes, chunks_info: list):
+    def save_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True):
         """Saves the file manifest. This file MUST remain private to the owner."""
 
         # Ensure chunks are sorted by index for consistent Merkle Root
@@ -28,6 +28,7 @@ class MetadataManager:
             "merkle_root": merkle_root,
             "size": total_size,
             "key": key.decode('utf-8'),  # The key is needed to decrypt
+            "compression": compression,  # Algorithm info
             "chunks": [
                 {
                     "index": c["index"],

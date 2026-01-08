@@ -553,8 +553,8 @@ async def stream_download(request):
         if not result:
             return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
 
-        shard_mgr, chunks_data = result
-
+        shard_mgr, chunks_data, compression_mode = result
+        
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {str(e)}")
 
@@ -568,10 +568,7 @@ async def stream_download(request):
     await response.prepare(request)
 
     try:
-        for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data):
-            await response.write(chunk_data)
-
-        await response.write_eof()
+        for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data, compression_mode=compression_mode):
     except Exception as e:
         print(f"Streaming error: {e}")
 

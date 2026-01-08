@@ -340,7 +340,7 @@ def distribute(args, progress_callback=None):
 
     meta_mgr = MetadataManager()
     manifest_path = meta_mgr.save_manifest(
-        os.path.basename(file_path), key, chunks_info_for_manifest)
+        os.path.basename(file_path), key, chunks_info_for_manifest, compression=use_compression)
 
     msg = f"Distribution completed successfully! Manifest: {os.path.basename(manifest_path)}"
     print(msg)
@@ -450,6 +450,7 @@ def reconstruct(args, progress_callback=None, stream=False):
     distributor = DistributionStrategy(nodes)
     key = manifest['key'].encode('utf-8')
     shard_mgr = ShardManager(key)
+    compression_mode = manifest.get('compression', None)
 
     try:
         chunks_data = collect_chunks_data(
@@ -459,7 +460,7 @@ def reconstruct(args, progress_callback=None, stream=False):
 
     if stream:
         # Return necessary objects for streaming instead of writing to disk
-        return shard_mgr, chunks_data
+        return shard_mgr, chunks_data, compression_mode
 
     if progress_callback:
         progress_callback(90, "Reassembling file...")
@@ -471,7 +472,7 @@ def reconstruct(args, progress_callback=None, stream=False):
                 pct, f"Reassembling: {int((done_chunks/total)*100)}%")
 
     shard_mgr.reconstruct_file(
-        chunks_data, output_path, progress_cb=reassembly_monitor)
+        chunks_data, output_path, progress_cb=reassembly_monitor, compression_mode=compression_mode)
 
     print(f"File reconstructed: {output_path}")
 
