@@ -453,7 +453,7 @@ def reconstruct(args, progress_callback=None, stream=False):
         nodes = prepare_network_for_reconstruct(args, progress_callback)
     except RuntimeError:
         return None
-    
+
     distributor = DistributionStrategy(nodes)
     meta_mgr = MetadataManager()
     manifest_path = manifest_source
@@ -470,15 +470,18 @@ def reconstruct(args, progress_callback=None, stream=False):
                 # Create 'manifests' folder if missing (should exist from MetadataManager but safer)
                 if not os.path.exists("manifests"):
                     os.makedirs("manifests")
-                
-                manifest_path = os.path.join("manifests", f"downloaded_{manifest_source}.manifest")
+
+                manifest_path = os.path.join(
+                    "manifests", f"downloaded_{manifest_source}.manifest")
                 with open(manifest_path, 'wb') as f:
                     f.write(manifest_data)
                 print(f"✅ Manifest downloaded to: {manifest_path}")
             except Exception as e:
-                raise RuntimeError(f"Failed to download manifest {manifest_source}: {e}")
+                raise RuntimeError(
+                    f"Failed to download manifest {manifest_source}: {e}")
         else:
-            raise FileNotFoundError(f"Error: Manifest {manifest_source} not found.")
+            raise FileNotFoundError(
+                f"Error: Manifest {manifest_source} not found.")
 
     if progress_callback:
         progress_callback(5, "Loading manifest...")

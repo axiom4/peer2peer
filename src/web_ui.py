@@ -180,7 +180,8 @@ async def download_file(request):
         return web.json_response({"status": "error", "message": "No manifest specified"}, status=400)
 
     # Check if input is a Manifest ID (64 char hex)
-    is_id = len(manifest_name) == 64 and all(c in '0123456789abcdefABCDEF' for c in manifest_name)
+    is_id = len(manifest_name) == 64 and all(
+        c in '0123456789abcdefABCDEF' for c in manifest_name)
 
     # Auto-append extension only if it's NOT an ID
     if not is_id and not manifest_name.endswith('.manifest'):
@@ -188,12 +189,13 @@ async def download_file(request):
 
     # Determine paths
     if is_id:
-        manifest_path = manifest_name # Pass ID directly
+        manifest_path = manifest_name  # Pass ID directly
         # Default output name if not provided
         default_out = f"download_{manifest_name[:8]}"
         output_name = data.get('output_name', default_out)
     else:
-        output_name = data.get('output_name', manifest_name.replace('.manifest', ''))
+        output_name = data.get(
+            'output_name', manifest_name.replace('.manifest', ''))
         manifest_path = os.path.join('manifests', manifest_name)
 
     output_path = os.path.join('downloads', output_name)
