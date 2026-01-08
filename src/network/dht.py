@@ -1,0 +1,309 @@
+import hashlib
+import heapq
+import time
+import requests
+import logging
+from typing import List, Tuple, Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+K_BUCKET_SIZE = 20
+ALPHA = 3
+ID_BITS = 256
+
+
+class NodeId:
+    def __init__(self, id_bytes: bytes):
+        if len(id_bytes) != ID_BITS // 8:
+            raise ValueError(f"ID must be {ID_BITS//8} bytes")
+        self.bytes = id_bytes
+        self.int = int.from_bytes(id_bytes, 'big')
+
+    @classmethod
+    def from_hex(cls, hex_str: str):
+        return cls(bytes.fromhex(hex_str))
+
+    @classmethod
+    def from_str(cls, s: str):
+        return cls(hashlib.sha256(s.encode('utf-8')).digest())
+    
+    @classmethod
+    def random(cls):
+        import os
+        return cls(os.urandom(ID_BITS // 8))
+
+    def xor_distance(self, other: 'NodeId') -> int:
+        return self.int ^ other.int
+
+    def hex(self) -> str:
+        return self.bytes.hex()
+    
+    def __eq__(self, other):
+        return self.int == other.int
+    
+    def __hash__(self):
+        return self.int
+    
+    def __str__(self):
+        return self.hex()
+
+
+class Peer:
+    def __init__(self, id: NodeId, host: str, port: int):
+        self.id = id
+        self.host = host
+        self.port = port
+        self.last_seen = time.time()
+
+    @property
+    def url(self):
+        return f"http://{self.host}:{self.port}"
+    
+    def to_dict(self):
+        return {
+            "id": self.id.hex(),
+            "host": self.host,
+            "port": self.port
+        }
+    
+    @classmethod
+    def from_dict(cls, d):
+        return cls(NodeId.from_hex(d["id"]), d["host"], d["port"])
+
+
+class KBucket:
+    def __init__(self, range_start: int, range_end: int):
+        self.range_start = range_start
+        self.range_end = range_end
+        self.peers: List[Peer] = []
+
+    def get_peer(self, peer_id: NodeId) -> Optional[Peer]:
+        for p in self.peers:
+            if p.id == peer_id:
+                return p
+        return None
+
+    def update(self, peer: Peer):
+        existing = self.get_peer(peer.id)
+        if existing:
+            self.peers.remove(existing)
+            self.peers.append(peer) # Move to tail (most recently seen)
+        elif len(self.peers) < K_BUCKET_SIZE:
+            self.peers.append(peer)
+        else:
+            # Bucket full. logic for eviction ping usually goes here.
+            # Simplified: Drop earliest seen (head) or keep assuming alive?
+            # Standard Kademlia: Ping head, if online drop new, if offline drop head
+            # Here: simple replacement for simulation
+            self.peers.pop(0) 
+            self.peers.append(peer)
+
+
+class RoutingTable:
+    def __init__(self, local_node_id: NodeId):
+        self.local_node_id = local_node_id
+        self.buckets: List[KBucket] = [KBucket(0, 2**ID_BITS)]
+
+    def add_contact(self, peer: Peer):
+        if peer.id == self.local_node_id:
+            return
+        
+        # Find appropriate bucket
+        bucket = self._find_bucket(peer.id)
+        bucket.update(peer)
+        
+        # Split bucket if full and holds local node range
+        # (Simplified Kademlia Logic: we just add for now, real splitting is complex)
+        # For this prototype we will skip dynamic splitting and just use one big bucket 
+        # or a fixed number of buckets?
+        # Actually proper Kademlia splitting is needed for O(logN)
+        # But for 50 nodes simulation, a simple list is fine.
+        # Let's keep KBucket simple: Standard Kademlia logic is complicated for a single file.
+        # We will iterate all peers for K-closest for now (since N=50 is small).
+        pass
+
+    def _find_bucket(self, id: NodeId) -> KBucket:
+        # Simplified: just return the first bucket
+        return self.buckets[0]
+
+    def find_k_closest(self, target_id: NodeId, k=K_BUCKET_SIZE) -> List[Peer]:
+        # Collect all peers from all buckets
+        all_peers = []
+        for b in self.buckets:
+            all_peers.extend(b.peers)
+        
+        # Sort by XOR distance
+        all_peers.sort(key=lambda p: p.id.xor_distance(target_id))
+        return all_peers[:k]
+
+
+class DHT:
+    def __init__(self, host: str, port: int, storage_dir: str):
+        self.node_id = NodeId.from_str(f"{host}:{port}")
+        self.host = host
+        self.port = port
+        self.routing_table = RoutingTable(self.node_id)
+        self.storage: Dict[str, str] = {} # chunk_id -> provider_url (Indexing)
+        # Note: Local chunks are also implicit storage? No, this is the DHT index.
+
+    def bootstrap(self, peers: List[str]):
+        """Join the network via list of peer URLs."""
+        for url in peers:
+            try:
+                # Parse URL to get host/port
+                # Assumes format http://host:port
+                from urllib.parse import urlparse
+                u = urlparse(url)
+                # We need to ask them their ID.
+                # Optimized: We assume we can PING them or FIND_NODE ourself.
+                self.ping(u.hostname, u.port)
+            except Exception as e:
+                logger.debug(f"Bootstrap fail for {url}: {e}")
+
+    def ping(self, host: str, port: int):
+        try:
+            url = f"http://{host}:{port}/dht/ping"
+            payload = {
+                "sender_id": self.node_id.hex(),
+                "host": self.host,
+                "port": self.port
+            }
+            requests.post(url, json=payload, timeout=2)
+            # If success, we add them? The response should validation.
+        except:
+            pass
+
+    def handle_ping(self, sender_info: dict):
+        sender_id = NodeId.from_hex(sender_info["sender_id"])
+        peer = Peer(sender_id, sender_info["host"], sender_info["port"])
+        self.routing_table.add_contact(peer)
+        return {"id": self.node_id.hex()}
+
+    def handle_find_node(self, target_id_hex: str, sender_info: dict):
+        # Add sender
+        self.handle_ping(sender_info)
+        
+        target_id = NodeId.from_hex(target_id_hex)
+        closest = self.routing_table.find_k_closest(target_id)
+        return {"nodes": [p.to_dict() for p in closest]}
+
+    def handle_find_value(self, key_hex: str, sender_info: dict):
+        self.handle_ping(sender_info)
+        
+        # If we have the value (location of chunk), return it
+        if key_hex in self.storage:
+            return {"value": self.storage[key_hex]}
+        
+        # Else return k closest nodes
+        target_id = NodeId.from_hex(key_hex) # Keys are in same ID space
+        closest = self.routing_table.find_k_closest(target_id)
+        return {"nodes": [p.to_dict() for p in closest]}
+    
+    def handle_store(self, key_hex: str, value: str, sender_info: dict):
+        self.handle_ping(sender_info)
+        self.storage[key_hex] = value
+        return {"status": "ok"}
+
+    # Client Side Operations
+    
+    def iterative_find_node(self, target_id: NodeId) -> List[Peer]:
+        # Kademlia Lookup Algorithm
+        shortlist = self.routing_table.find_k_closest(target_id, ALPHA)
+        tried_ids = set()
+        
+        if not shortlist:
+            return []
+
+        # Simplified Iterative Lookup
+        # In real impl: parallel queries, verify liveness, etc.
+        # Here: sequential for simplicity
+        
+        closest_node = shortlist[0]
+        
+        while True:
+            # Pick alpha nodes from shortlist that haven't been tried
+            candidates = [p for p in shortlist if p.id.hex() not in tried_ids][:ALPHA]
+            if not candidates:
+                break
+                
+            updated = False
+            for peer in candidates:
+                tried_ids.add(peer.id.hex())
+                try:
+                    url = f"{peer.url}/dht/find_node"
+                    resp = requests.post(url, json={
+                         "target_id": target_id.hex(),
+                         "sender": self._my_info()
+                    }, timeout=1).json()
+                    
+                    found_nodes = [Peer.from_dict(d) for d in resp["nodes"]]
+                    for n in found_nodes:
+                        if n.id.hex() not in [p.id.hex() for p in shortlist]:
+                            shortlist.append(n)
+                            updated = True
+                except:
+                    pass
+            
+            shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
+            shortlist = shortlist[:K_BUCKET_SIZE]
+            
+            if not updated:
+                break
+        
+        return shortlist
+
+    def iterative_find_value(self, key: str) -> Optional[str]:
+        target_id = NodeId.from_hex(key)
+        shortlist = self.routing_table.find_k_closest(target_id, ALPHA)
+        tried_ids = set()
+        
+        while True:
+            candidates = [p for p in shortlist if p.id.hex() not in tried_ids][:ALPHA]
+            if not candidates:
+                break
+                
+            for peer in candidates:
+                tried_ids.add(peer.id.hex())
+                try:
+                    url = f"{peer.url}/dht/find_value"
+                    resp = requests.post(url, json={
+                         "key": key,
+                         "sender": self._my_info()
+                    }, timeout=1).json()
+                    
+                    if "value" in resp:
+                        return resp["value"]
+                    
+                    found_nodes = [Peer.from_dict(d) for d in resp.get("nodes", [])]
+                    for n in found_nodes:
+                        if n.id.hex() not in [p.id.hex() for p in shortlist]:
+                            shortlist.append(n)
+                    
+                    shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
+                    shortlist = shortlist[:K_BUCKET_SIZE]
+                    
+                except:
+                    pass
+        return None
+
+    def put(self, key: str, value: str):
+        """Announce that 'value' (url) has 'key' (chunk_id) to the K closely nodes."""
+        target_id = NodeId.from_hex(key)
+        nodes = self.iterative_find_node(target_id)
+        
+        for peer in nodes:
+            try:
+                requests.post(f"{peer.url}/dht/store", json={
+                    "key": key, 
+                    "value": value,
+                    "sender": self._my_info()
+                }, timeout=1)
+            except:
+                pass
+
+    def _my_info(self):
+        return {
+            "sender_id": self.node_id.hex(),
+            "host": self.host,
+            "port": self.port
+        }
