@@ -57,11 +57,11 @@ class MetadataManager:
 
         # Update chunks
         data['chunks'] = chunks
-        
+
         # Helper function to get chunk ID safely
         def get_chunk_id(c):
-             # Handle both dict and object if necessary, assuming dict for now based on usage
-             return c.get('id') if isinstance(c, dict) else c.id
+            # Handle both dict and object if necessary, assuming dict for now based on usage
+            return c.get('id') if isinstance(c, dict) else c.id
 
         # Update Merkle Root
         # Ensure chunks are sorted by index

@@ -1,6 +1,7 @@
 import hashlib
 from typing import List
 
+
 class MerkleTree:
     def __init__(self, leaves: List[str]):
         """
@@ -31,9 +32,10 @@ class MerkleTree:
                     right = left  # Duplicate last element if odd number of leaves
 
                 combined = left + right
-                node_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
+                node_hash = hashlib.sha256(
+                    combined.encode('utf-8')).hexdigest()
                 next_level.append(node_hash)
-            
+
             self.tree.append(next_level)
             current_level = next_level
 
@@ -54,10 +56,10 @@ class MerkleTree:
             raise IndexError("Leaf index out of bounds")
 
         proof = []
-        for level in self.tree[:-1]: # Exclude root level
+        for level in self.tree[:-1]:  # Exclude root level
             is_right_child = index % 2 == 1
             sibling_index = index - 1 if is_right_child else index + 1
-            
+
             if sibling_index < len(level):
                 sibling_hash = level[sibling_index]
             else:
@@ -68,9 +70,9 @@ class MerkleTree:
                 "hash": sibling_hash,
                 "position": "left" if is_right_child else "right"
             })
-            
-            index //= 2 # Move up to parent index
-            
+
+            index //= 2  # Move up to parent index
+
         return proof
 
     @staticmethod
@@ -85,7 +87,7 @@ class MerkleTree:
                 combined = sibling_hash + current_hash
             else:
                 combined = current_hash + sibling_hash
-            
+
             current_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
-            
+
         return current_hash == root

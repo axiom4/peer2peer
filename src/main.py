@@ -1,3 +1,4 @@
+from core.merkle import MerkleTree
 from network.discovery import scan_network
 import argparse
 import os
@@ -280,8 +281,6 @@ def distribute(args, progress_callback=None):
     print(f"Manifest saved in: {manifest_path}")
 
 
-from core.merkle import MerkleTree
-
 def reconstruct(args):
     """Recovery/reconstruction logic."""
     manifest_path = args.manifest
@@ -372,19 +371,20 @@ def reconstruct(args):
         expected_root = manifest.get('merkle_root')
         if expected_root:
             print("\nVerifying data integrity with Merkle Tree...")
-            
+
             # Re-read the downloaded chunks from manifest (which has the IDs)
             # We trust that ShardManager has written the correct bytes.
             # To be strictly correct we should verify that the downloaded chunks ID match
             # But here we verify the full set of chunk IDs from manifest against the root
-            
+
             # A more robust check would happen inside ShardManager, but let's do it here
-            chunk_ids = [c['id'] for c in manifest['chunks']] # These are the IDs we requested
-            
+            # These are the IDs we requested
+            chunk_ids = [c['id'] for c in manifest['chunks']]
+
             # Check if the set of IDs we used matches the Merkle Root signed in manifest
             verifier = MerkleTree(chunk_ids)
             computed_root = verifier.get_root()
-            
+
             if computed_root == expected_root:
                 print("✅ INTEGRITY CHECK PASSED: Merkle Root matches.")
             else:
