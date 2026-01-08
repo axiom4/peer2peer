@@ -9,12 +9,14 @@ An advanced peer-to-peer distribution and storage system designed to ensure secu
 - **Zero Knowledge**: Storage nodes only hold anonymous binary blobs. They do not possess decryption keys or metadata about the original files.
 - **High Resilience**:
   - **5x Redundancy**: Each chunk is replicated across 5 distinct nodes.
-  - **UDP Storage Search**: Data location is discovered in real-time using UDP Broadcast queries (`QUERY_CHUNK`), removing the need for location metadata or HTTP crawling.
-  - **Auto-Discovery**: Automatic peer detection via UDP Broadcast (Port 9999).
+  - **UDP Storage Search**: Data location is discovered in real-time using UDP Broadcast queries (`QUERY_CHUNK`) and DHT lookups.
+  - **Auto-Discovery**: Automatic peer detection via UDP Broadcast (Port 9999) and iterative Kademlia-like DHT.
 - **Total Privacy**: The "manifest" required to reconstruct the file resides only on the client and does NOT contain IP addresses, making it impossible to trace data location from the file itself.
+- **Direct Streaming**: Files can be streamed directly from the distributed network to the browser without intermediate disk storage.
+- **Garbage Collection**: Built-in "Prune" functionality to identify and remove orphan chunks (data not referenced by valid manifests) to free up space.
 - **Graceful Exit**: Nodes support a "Unjoin" operation to offload data to peers and clean up storage before shutting down.
 - **Open Standards**: Full OpenAPI 3.0 documentation available on every node (`/openapi`).
-- **Full Web Interface**: Dashboard to manage files, view network topology, and monitor real-time distribution.
+- **Full Web Interface**: Dashboard to manage files, stream content, view network topology, and monitor real-time distribution.
 
 ## System Architecture
 
@@ -22,14 +24,15 @@ The system consists of autonomous nodes forming a dynamic mesh network.
 
 ### 1. Client (Uploader/Downloader)
 
-- **Processing**: Split file -> Compression (LZMA) -> Encryption (Fernet) -> Binary Pack.
+- **Processing**: Split file -> Compression (Zlib/LZMA) -> Encryption (Fernet) -> Binary Pack.
 - **Distribution**: Parallel sending to dynamically discovered nodes.
-- **Manifest**: Generation of a local `.manifest` file containing only the cryptographic IDs of the chunks and the session key.
+- **Manifest**: Generation of a local `.manifest` file containing cryptographic IDs, compression method, and the session key.
 
 ### 2. P2P Nodes
 
-- Lightweight HTTP nodes based on `aiohttp`.
-- No central database: each node only knows its direct neighbors.
+- **Async Architecture**: Fully asynchronous nodes based on `aiohttp` and `asyncio` for high concurrency.
+- **Distributed Hash Table (DHT)**: Implements an async Kademlia-lite DHT for efficient peer and content lookup without flooding.
+- No central database: each node only knows its direct neighbors and DHT routing table.
 - "Gossip" and "Query Forwarding" logic for request propagation and data retrieval without central indexing.
 
 ### Graphical Visualization
@@ -76,8 +79,10 @@ Open your browser at:
 From the Web UI you can:
 
 - Upload files (drag & drop).
-- Download/Reconstruct files.
+- Download/Reconstruct files to server disk.
+- **Stream** files directly to your browser.
 - Delete files (Manifest + Network).
+- **Prune** orphan chunks to free space.
 - View the distribution map.
 
 ## Detailed Project Structure
@@ -119,11 +124,18 @@ python3 src/main.py distribute -f my_document.pdf --scan
 python3 src/main.py reconstruct -m manifests/my_document.pdf.manifest --output rec_doc.pdf
 ```
 
+**Clean Orphan Chunks:**
+
+```bash
+python3 src/main.py prune
+```
+
 ## Technical Notes
 
 - **Log Files**: Each node's logs are saved individually in the `logs/` folder for easier debugging.
 - **Security**: The encryption key is unique for each upload and resides only in the user's manifest. Without the manifest, network data is unintelligible binary blobs.
-- **Compression**: Using LZMA and binary format ensures high efficiency but makes files on disk unreadable as plain text.
+- **Compression**: The manifest now strictly stores the compression mode (Zlib/None) to ensure bit-perfect reconstruction preventing data corruption on raw files.
+- **Performance**: Uses `asyncio` for non-blocking I/O and connection pooling for efficient transfers.
 
 The system supports two modes: **Local Simulation** (default) and **Real P2P Network**.
 

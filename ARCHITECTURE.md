@@ -11,9 +11,9 @@ The upload process transforms a single file into many optimized, anonymous fragm
 When a user uploads a file, the `ShardManager` executes an in-memory transformation pipeline:
 
 1. **Block Reading**: The file is segmented into fixed-size chunks (1MB).
-2. **Compression**: Each chunk is individually compressed using the **LZMA (Preset Extreme)** algorithm.
+2. **Compression**: Each chunk is individually compressed using **Zlib** (faster, better for streaming) or optionally **LZMA**.
 
-   > _Goal_: Dramatically reduce network traffic and disk space required on remote nodes.
+   > _Goal_: Reduce network traffic and disk space.
 
 3. **Encryption**: The compressed chunk is encrypted with the Fernet algorithm (AES-128 in CBC mode with SHA256 HMAC).
 
@@ -29,12 +29,12 @@ When a user uploads a file, the `ShardManager` executes an in-memory transformat
 
 The `DistributionStrategy` manages data dispersion:
 
-1. **Beacon Discovery**: The client listens for UDP broadcast beacons (Port 9999) to instantly map all active nodes in the LAN.
+1. **Beacon Discovery**: The client listens for UDP broadcast beacons (Port 9999) and queries the **DHT** to map active nodes.
 2. **Node Selection**: For each chunk, **5 distinct nodes** are selected randomly (Replication Factor $N=5$).
 
    > This redundancy ensures data survival even if 4 out of 5 custodian nodes go offline simultaneously.
 
-3. **Parallel Upload**: Blobs are uploaded in parallel via HTTP/1.1 (Keep-Alive) to maximize throughput.
+3. **Parallel Upload**: Blobs are uploaded in parallel via HTTP/1.1 (Keep-Alive) pooling to maximize throughput.
 
 ### C. Manifest Creation
 
@@ -43,7 +43,8 @@ At the end of the upload, a `.manifest` (JSON) file is generated on the client s
 - Contains the decryption key (required to read the data).
 - Contains the **Merkle Root** for file integrity verification.
 - Contains the ordered list of chunk hashes.
-- **Privacy**: Does not contain original file names or node IP addresses (location is found dynamically during restore via Network Query).
+- **Compression Mode**: Explicitly stores if compression was enabled/disabled to ensure correct reconstruction.
+- **Privacy**: Does not contain original file names or node IP addresses (location is found dynamically during restore via Network Query/DHT).
 
 ---
 
@@ -51,13 +52,13 @@ At the end of the upload, a `.manifest` (JSON) file is generated on the client s
 
 The client does not know the data location a priori; it must discover it.
 
-### A. Network Querying (UDP Broadcast)
+### A. Network Discovery (Hybrid Strategy)
 
-The client analyzes the `.manifest` and for each chunk launches a **UDP Search**:
+The client uses a hybrid approach to find chunks:
 
-1. **UDP Broadcast Query**: The client broadcasts a `QUERY_CHUNK` message to the entire network (UDP Port 9999).
-2. **Asynchronous Response**: Nodes holding the requested chunk respond directly with an `I_HAVE` message containing their URL.
-3. **Optimized Retrieval**: The client creates a list of "owners" and performs a direct HTTP GET from one of the active nodes.
+1. **DHT Lookup (Primary)**: Queries the Distributed Hash Table to find nodes that announced holding the chunk.
+2. **UDP Broadcast (Fallback)**: If DHT fails, broadcasts a `QUERY_CHUNK` message to the entire subnet.
+3. **HTTP Retrieval**: The client performs a direct HTTP GET from one of the active nodes found.
 
 This removes the need for "Flooding" or "Crawling" via HTTP, making discovery instant and scalable.
 
@@ -67,8 +68,16 @@ The received blob undergoes the reverse process of upload:
 
 1. **Binary Unpack**: Reads raw bytes.
 2. **Decryption**: Uses the Fernet key from the manifest.
-3. **Decompression**: Expands data via LZMA.
+3. **Decompression**: Expands data via Zlib/LZMA (based on manifest flag).
 4. **Assembly**: Writes the byte stream to the correct position in the final file.
+
+### C. Direct Streaming (Memory-Only)
+
+For web downloads, the system bypasses disk writing:
+
+- **Generator Pipeline**: Chunks are fetched, decrypted, and yielded one by one in memory.
+- **HTTP Stream**: The backend streams these bytes directly to the browser (`application/octet-stream`).
+- **No Temp Files**: Reconstructed file is never saved to the server's disk, complying with strict ephemeral storage requirements.
 
 ## Flow Diagram (Sequence)
 
@@ -81,32 +90,32 @@ sequenceDiagram
    participant Manifest as 📜 Manifest File
 
    Note over Client, Network: 📤 Phase 1: Distribution (Secure Pipeline)
-   Client->>Engine: Stream File (1MB Chunks)
+   Client->>Engine: Stream File (4MB Chunks)
 
    loop For each Chunk
-      Engine->>Engine: 1. Compress (LZMA Extreme)
+      Engine->>Engine: 1. Compress (Zlib)
       Engine->>Engine: 2. Encrypt (Fernet Key)
       Engine->>Engine: 3. Binary Pack (Base64 Decode)
       Engine->>Network: 4. Parallel PUT /chunk/{id} (To 5 Nodes)
       Network-->>Client: 200 OK (x5)
    end
 
-   Client->>Manifest: Save Key + ChunkHashes
+   Client->>Manifest: Save Key + ChunkHashes + CompressionMode
 
    Note over Client, Network: 📥 Phase 2: Restore (Zero-Knowledge)
    Client->>Manifest: Load Manifest (Key + IDs)
-   Client->>Network: Discover Peers (UDP Beacon)
+   Client->>Network: Discover Peers (DHT + UDP)
 
    loop For each Chunk
-      Client->>Network: UDP Broadcast QUERY_CHUNK (Who has {id}?)
-      Network-->>Client: UDP Unicast I_HAVE (Node X)
+      Client->>Network: DHT/UDP Query (Who has {id}?)
+      Network-->>Client: Owner URL
       Client->>Network: GET /chunk/{id} (To Node X)
       Network-->>Client: Raw Binary Stream
 
       Client->>Engine: 1. Decrypt (Fernet)
 
-      Client->>Engine: 2. Decompress (LZMA)
-      Engine->>Client: Write Original Bytes
+      Client->>Engine: 2. Decompress (Zlib/LZMA)
+      Engine->>Client: Write Original Bytes / Stream
    end
 ```
 
@@ -119,7 +128,8 @@ The system is designed to ensure data availability even in case of massive disco
 The architecture uses a **Simple Replication** model with factor $N=5$.
 Unlike Erasure Coding systems (e.g., Reed-Solomon) which require CPU-intensive reconstruction, simple replication favors read latency and immediate resilience.
 
-- **Node Selection**: During upload, the client selects 5 random nodes from the discovered pool. No rigid DHT (Distributed Hash Table) is used to avoid rebalancing complexity in volatile local networks.
+- **Node Selection**: During upload, the client selects 5 random nodes.
+  - **Kademlia DHT**: Nodes also announce themselves to a valid ID space, allowing closer-node selection in future iterations.
 - **High Availability**: This ensures data is accessible as long as at least **1 of the 5 custodian nodes** remains online and reachable.
 - **Implicit Load Balancing**: Since each chunk chooses a different set of 5 nodes, storage and bandwidth load is evenly distributed across the cluster (Statistical Load Balancing).
 
@@ -143,29 +153,28 @@ graph TD
 
    Client["👤 Client Downloader"]
 
-   Client -->|"1. Broadcast Query (UDP)"| N1
-   Client -->|"1. Broadcast Query (UDP)"| N2
+   Client -->|"1. DHT Lookup"| N1
+   Client -.->|"2. UDP Broadcast (Fallback)"| N2
    Client -.->|Timeout| N3
-   Client -->|"2. Download (HTTP)"| N4
-
-   Note["The network withstands the loss of N nodes.\nJust 1 active replica is enough for restore."]
+   Client -->|"3. Download (HTTP)"| N4
+   
+   Note["Hybrid Discovery: DHT + UDP"]
 ```
 
 ## 4. Communication Protocol Specification
 
 ### Protocol Layers
 
-The system relies on a dual-protocol stack: UDP for low-latency control and discovery, and HTTP for reliable data transfer.
+The system relies on a dual-protocol stack: UDP for low-latency control and discovery, and HTTP for reliable data transfer, augmented by a Kademlia-based DHT overlay.
 
-#### A. Discovery & Control Layer (UDP)
+#### A. Discovery & Control Layer (UDP + DHT)
 
-- **Port**: `9999` (Broadcast)
-- **Role**: Peer Discovery, Liveness, Content Search.
+- **UDP Port**: `9999` (Broadcast)
+- **Role**: Peer Discovery, Liveness, Local Content Search.
 
 **1. HELLO Message (Beacon)**
 Broadcasted every 1s by every active node.
 
-- **Direction**: Broadcast -> Network
 - **Payload**:
   ```json
   {
@@ -174,36 +183,18 @@ Broadcasted every 1s by every active node.
   }
   ```
 
-**2. QUERY_CHUNK Message (Search)**
-Sent by a client or node looking for a specific chunk.
+**2. DHT Messages (RPC Over HTTP)**
+Nodes maintain a routing table for efficient lookups.
 
-- **Direction**: Broadcast -> Network
-- **Payload**:
-  ```json
-  {
-    "type": "QUERY_CHUNK",
-    "chunk_id": "a1b2c3d4..."
-  }
-  ```
-
-**3. I_HAVE Message (Response)**
-Unicast response from a node that holds the requested chunk.
-
-- **Direction**: Node -> Requestor (Unicast)
-- **Payload**:
-  ```json
-  {
-    "type": "I_HAVE",
-    "chunk_id": "a1b2c3d4...",
-    "url": "http://192.168.1.50:8005"
-  }
-  ```
+- **PING**: Check node liveness.
+- **STORE**: Publish key-value pair (ChunkID -> NodeURL).
+- **FIND_NODE**: Find closest nodes to ID.
+- **FIND_VALUE**: Find providers for a ChunkID.
 
 #### B. Data Transport Layer (HTTP/REST)
 
 - **Ports**: Dynamic range (8000-80XX).
-- **Role**: Heavy data transfer, Node Management.
-- **Documentation**: OpenAPI spec available at `/openapi`.
+- **Role**: Heavy data transfer, Node Management, DHT RPC.
 
 **Endpoints:**
 
@@ -212,38 +203,37 @@ Unicast response from a node that holds the requested chunk.
 | **GET**  | `/chunks`     | **Inventory**. Returns list of all stored chunk IDs.   |
 | **GET**  | `/chunk/{id}` | **Download**. Stream the binary content of the chunk.  |
 | **PUT**  | `/chunk/{id}` | **Upload/Replicate**. Save a chunk to this node.       |
+| **POST** | `/dht/store`  | **DHT**. Store key-value pair.                         |
+| **POST** | `/dht/find_value`| **DHT**. Find providers for value.                   |
 | **POST** | `/unjoin`     | **Leave**. Trigger graceful exit and data offload.     |
-| **GET**  | `/status`     | **Health**. Node stats (peers count, storage usage).   |
+| **GET**  | `/status`     | **Health**. Node stats.                                |
 | **GET**  | `/openapi`    | **Spec**. Returns full Swagger/OpenAPI 3.0 definition. |
 
 ### Protocol Interaction Diagram
 
-The following diagram illustrates the detailed message flow between nodes for discovery and data exchange.
+The following diagram illustrates the detailed message flow between nodes for discovery and data exchange (Hybrid Mode).
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant NodeA as 🖥️ Node A (Requester)
-    participant Broad as 📣 Broadcast (UDP:9999)
+    participant Broad as 📣 Broadcast / DHT
     participant NodeB as 🖥️ Node B (Holder)
     participant NodeC as 🖥️ Node C (Other Peer)
 
-    Note over NodeA, NodeC: 1. Peer Discovery (Heartbeat)
-    NodeA->>Broad: HELLO {port: 8000}
-    Broad-->>NodeB: Receive HELLO
-    Broad-->>NodeC: Receive HELLO
-    NodeB->>NodeB: Update Peer List (Add A)
-    NodeC->>NodeC: Update Peer List (Add A)
+    Note over NodeA, NodeC: 1. Peer Discovery (Bootstrap)
+    NodeA->>Broad: UDP HELLO / DHT PING
+    NodeB->>NodeB: Update Routing Table
+    NodeC->>NodeC: Update Routing Table
 
-    Note over NodeA, NodeC: 2. Content Discovery (Search)
-    NodeA->>Broad: QUERY_CHUNK {id: "hash123"}
-    Broad-->>NodeB: Receive QUERY
-    Broad-->>NodeC: Receive QUERY
-
-    NodeC->>NodeC: Check Storage (Miss)
-    NodeB->>NodeB: Check Storage (Hit)
-
-    NodeB->>NodeA: I_HAVE {url: "http://NodeB:8001"} (Unicast)
+    Note over NodeA, NodeC: 2. Content Discovery (Hybrid)
+    NodeA->>Broad: DHT FIND_VALUE {id: "hash123"}
+    alt Found in DHT
+        Broad-->>NodeA: Found Providers: [NodeB]
+    else Not Found
+        NodeA->>Broad: UDP QUERY_CHUNK {id: "hash123"} (Fallback)
+        NodeB->>NodeA: I_HAVE {url: "http://NodeB:8001"}
+    end
 
     Note over NodeA, NodeC: 3. Data Transfer (Reliable HTTP)
     NodeA->>NodeB: GET /chunk/hash123
@@ -251,6 +241,7 @@ sequenceDiagram
     NodeB-->>NodeA: 200 OK (Binary Stream)
     deactivate NodeB
 ```
+
 
 ---
 
@@ -278,15 +269,15 @@ graph TD
    end
 
    %% Broadcast Discovery
-   Client -.-o|"UDP: HELLO / QUERY"| N1
-   Client -.-o|"UDP: HELLO / QUERY"| N2
-   Client -.-o|"UDP: HELLO / QUERY"| N3
+   Client -.-o|"UDP: Broadcast / DHT RPC"| N1
+   Client -.-o|"UDP: Broadcast / DHT RPC"| N2
+   Client -.-o|"UDP: Broadcast / DHT RPC"| N3
 
    %% Mesh interactions (logical)
-   N1 <-->|"HTTP: Transfer"| N2
-   N2 <-->|"HTTP: Transfer"| N3
+   N1 <-->|"HTTP: Transfer / DHT Gossip"| N2
+   N2 <-->|"HTTP: Transfer / DHT Gossip"| N3
 
-   Note["📡 Auto-Discovery:<br/>Port 9999/UDP<br/>Data: HTTP API"]
+   Note["📡 Hybrid Discovery:<br/>Port 9999/UDP (Beacon)<br/>DHT over HTTP (Find)"]
 ```
 
 ## 6. Node Lifecycle Management
