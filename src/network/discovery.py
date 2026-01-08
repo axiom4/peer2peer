@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import asyncio
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,13 @@ async def scan_network(timeout=3):
     found_peers = set()
     start_time = time.time()
 
-    while time.time() - start_time < timeout:
+    while True:
+        elapsed = time.time() - start_time
+        remaining = timeout - elapsed
+        if remaining <= 0:
+            break
+            
+        sock.settimeout(remaining)
         try:
             data, addr = sock.recvfrom(1024)
             message = json.loads(data.decode('utf-8'))
@@ -166,10 +173,18 @@ async def scan_network(timeout=3):
 
 def _udp_search_sync(chunk_ids, timeout):
     """Sync implementation of UDP search."""
+    if not chunk_ids:
+        return {}
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(timeout)
-    sock.bind(('', 0))
+    try:
+        sock.bind(('', 0))
+    except Exception:
+        sock.close()
+        return {cid: [] for cid in chunk_ids}
 
     # Send Queries
     for cid in chunk_ids:
@@ -177,22 +192,43 @@ def _udp_search_sync(chunk_ids, timeout):
             {"type": "QUERY_CHUNK", "chunk_id": cid}).encode('utf-8')
         try:
             sock.sendto(msg, ('<broadcast>', BROADCAST_PORT))
+        except Exception:
+            pass
+        try:
             sock.sendto(msg, ('255.255.255.255', BROADCAST_PORT))
-        except:
+        except Exception:
             pass
 
     # Collect Replies
     results = {cid: set() for cid in chunk_ids}
 
     start_time = time.time()
-    while time.time() - start_time < timeout:
+    while True:
+        elapsed = time.time() - start_time
+        remaining = timeout - elapsed
+        if remaining <= 0:
+            break
+            
+        sock.settimeout(remaining)
         try:
-            data, addr = sock.recvfrom(1024)
+            data, addr = sock.recvfrom(4096)
             msg = json.loads(data.decode('utf-8'))
 
             if msg.get("type") == "I_HAVE":
                 cid = msg.get("chunk_id")
-                url = msg.get("url")
+                raw_url = msg.get("url")
+                
+                # Normalize URL to use the observed IP address (addr[0])
+                # This ensures consistency with scan_network which uses addr[0]
+                # preventing mismatch between "candidates" and "live_locations"
+                try:
+                    parsed = urlparse(raw_url)
+                    if parsed.port:
+                        url = f"http://{addr[0]}:{parsed.port}"
+                    else:
+                        url = raw_url
+                except:
+                    url = raw_url
 
                 if cid in results:
                     results[cid].add(url)

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>P2P Storage Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
       #network-graph {
@@ -134,7 +135,8 @@
                     </div>
                     <div class="btn-group ms-2">
                         <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${cleanName}')" title="View Map">Map</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')" title="Download">Get</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadFile('${cleanName}')" title="Download to Server">Get</button>
+                        <button class="btn btn-sm btn-outline-success" onclick="streamDownload('${cleanName}')" title="Download Directly to Browser">Stream</button>
                         <button class="btn btn-sm btn-outline-warning" onclick="repairFile('${cleanName}')" title="Check Health & Repair">Fix</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${cleanName}')" title="Delete">Del</button>
                     </div>
@@ -144,6 +146,11 @@
         } catch (e) {
           console.error(e);
         }
+      }
+
+      function streamDownload(manifestName) {
+         if (!confirm(`Stream download ${manifestName} directly? This depends on your browser to save the file.`)) return;
+         window.location.href = `/api/stream/${manifestName}`;
       }
 
       async function deleteManifest(name) {
@@ -303,7 +310,14 @@
         // if (!confirm(`Download file from ${manifestName}?`)) return;
         try {
           const statusDiv = document.getElementById("uploadStatus"); // Reusing status div
-          statusDiv.innerHTML = `<div class="alert alert-info">Preparing download for ${manifestName}...</div>`;
+          
+          // Show progress bar
+          statusDiv.innerHTML = `
+            <div class="progress mb-2" style="height: 25px;">
+                <div id="downloadBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info text-dark" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+            </div>
+            <div id="downloadStatusText" class="text-muted small">Preparing download for ${manifestName}...</div>
+          `;
 
           const res = await fetch("/api/download", {
             method: "POST",
@@ -311,7 +325,57 @@
             body: JSON.stringify({ manifest: manifestName }),
           });
           const result = await res.json();
-          if (result.status === "ok" && result.download_url) {
+          
+          if (result.status === "processing" && result.task_id) {
+              const taskId = result.task_id;
+              const progressBar = document.getElementById("downloadBar");
+              const statusText = document.getElementById("downloadStatusText");
+              
+              const pollInterval = setInterval(async () => {
+                  try {
+                      const r = await fetch(`/api/progress/${taskId}`);
+                      const task = await r.json();
+                      
+                      if (task.status === "completed") {
+                          clearInterval(pollInterval);
+                          if (progressBar) {
+                              progressBar.style.width = "100%";
+                              progressBar.innerText = "Ready";
+                              progressBar.classList.remove("progress-bar-animated");
+                              progressBar.classList.add("bg-success", "text-white");
+                          }
+                          statusDiv.innerHTML = `<div class="alert alert-success">Download ready!</div>`;
+                          
+                          // Trigger browser download if URL provided
+                          if (task.download_url) {
+                            const a = document.createElement("a");
+                            a.href = task.download_url;
+                            a.download = manifestName.replace(".manifest", "");
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                          }
+                          
+                          setTimeout(() => { statusDiv.innerHTML = ""; }, 3000);
+                          
+                      } else if (task.status === "error") {
+                          clearInterval(pollInterval);
+                           statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
+                      } else {
+                          // Update progress
+                          if (progressBar) {
+                              progressBar.style.width = task.percent + "%";
+                              progressBar.innerText = task.percent + "%";
+                          }
+                          if (statusText) statusText.innerText = task.message;
+                      }
+                  } catch(e) {
+                      console.error("Polling error", e);
+                  }
+              }, 1000);
+              
+          } else if (result.status === "ok" && result.download_url) {
+             // Legacy/Fast path (if sync)
             statusDiv.innerHTML = `<div class="alert alert-success">Download started!</div>`;
 
             // Trigger browser download
@@ -330,7 +394,7 @@
             statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
           }
         } catch (e) {
-          alert("Error triggering download");
+          alert("Error triggering download: " + e);
         }
       }
 
@@ -401,7 +465,8 @@
       }
 
       // --- Upload ---
-      document.getElementById("uploadForm").addEventListener("submit", (e) => {
+      const uploadForm = document.getElementById("uploadForm");
+      if (uploadForm) uploadForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const input = document.getElementById("fileInput");
         if (!input.files[0]) return;
@@ -565,19 +630,51 @@
 
           const options = {
             nodes: {
-              shape: "dot",
-              size: 16,
-              font: { size: 12 },
+              shape: "icon",
+              icon: {
+                face: "'Font Awesome 5 Free'",
+                weight: "900",
+                code: "\uf233",
+                size: 30,
+                color: "#0d6efd",
+              },
+              font: { size: 12, face: "arial", background: "rgba(255,255,255,0.7)" },
+              shadow: true,
             },
             edges: {
-              arrows: "to",
-              color: { color: "#848484" },
+              arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+              color: { color: "#adb5bd", highlight: "#0d6efd", opacity: 0.6 },
+              smooth: { type: "continuous" },
+              width: 1,
+            },
+            interaction: {
+              hover: true,
+              tooltipDelay: 200,
+              hideEdgesOnDrag: true,
+              multiselect: true,
             },
             physics: {
               enabled: true,
-              stabilization: {
-                iterations: 200,
+              solver: "forceAtlas2Based",
+              forceAtlas2Based: {
+                theta: 0.5,
+                gravitationalConstant: -50,
+                centralGravity: 0.01,
+                springConstant: 0.08,
+                springLength: 100,
+                damping: 0.4,
+                avoidOverlap: 0,
               },
+              maxVelocity: 50,
+              minVelocity: 0.1, // Stop when stable
+              stabilization: {
+                enabled: true,
+                iterations: 1000,
+                updateInterval: 50,
+                onlyDynamicEdges: false,
+                fit: true,
+              },
+              adaptiveTimestep: true,
             },
             layout: {
               randomSeed: 2,
@@ -585,7 +682,26 @@
           };
 
           // Re-create network
-          network = new vis.Network(container, data, options);
+          // Transform data for better display
+          const nodes = data.nodes.map((n) => ({
+            id: n.id,
+            label: n.id.replace("http://", "").replace(":", "\n"), // Stack port
+            title: n.id,
+          }));
+
+          const edges = data.edges;
+
+          network = new vis.Network(container, { nodes, edges }, options);
+
+          // Add click interaction for highlighting neighbors
+          network.on("selectNode", function (params) {
+            if (params.nodes.length == 1) {
+              const nodeId = params.nodes[0];
+              const connectedNodes = network.getConnectedNodes(nodeId);
+              // You could implement specific highlighting logic here if needed
+              // Vis.js handles basic selection highlighting by default via 'color.highlight'
+            }
+          });
         } catch (e) {
           console.error("Failed to load graph", e);
           document.getElementById("network-graph").innerHTML = '<div class="alert alert-danger m-3">Failed to load graph data</div>';

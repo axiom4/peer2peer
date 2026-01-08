@@ -2,7 +2,7 @@
 
 # Configuration
 START_PORT=8000
-NUM_NODES=50
+NUM_NODES=20
 HOST="0.0.0.0"
 LOG_DIR="logs"
 

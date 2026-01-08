@@ -25,13 +25,17 @@ class DistributionStrategy:
         selected_nodes = random.sample(available_nodes, self.redundancy_factor)
 
         success_nodes = []
+        import time
 
         def _store_task(node):
-            try:
-                if node.store(chunk_id, data):
-                    return node.get_id()
-            except Exception as e:
-                print(f"Error saving to {node.get_id()}: {e}")
+            # Simple retry per node
+            for attempt in range(3):
+                try:
+                    if node.store(chunk_id, data):
+                        return node.get_id()
+                except Exception as e:
+                    print(f"Error saving to {node.get_id()} (Attempt {attempt+1}): {e}")
+                    time.sleep(0.5)  # Backoff
             return None
 
         # Parallel upload to replicas

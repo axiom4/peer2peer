@@ -1,8 +1,9 @@
 import hashlib
 import heapq
 import time
-import requests
+import aiohttp
 import logging
+import asyncio
 from typing import List, Tuple, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class DHT:
         self.storage: Dict[str, str] = {}
         # Note: Local chunks are also implicit storage? No, this is the DHT index.
 
-    def bootstrap(self, peers: List[str]):
+    async def bootstrap(self, peers: List[str]):
         """Join the network via list of peer URLs."""
         for url in peers:
             try:
@@ -157,11 +158,11 @@ class DHT:
                 u = urlparse(url)
                 # We need to ask them their ID.
                 # Optimized: We assume we can PING them or FIND_NODE ourself.
-                self.ping(u.hostname, u.port)
+                await self.ping(u.hostname, u.port)
             except Exception as e:
                 logger.debug(f"Bootstrap fail for {url}: {e}")
 
-    def ping(self, host: str, port: int):
+    async def ping(self, host: str, port: int):
         try:
             url = f"http://{host}:{port}/dht/ping"
             payload = {
@@ -169,7 +170,9 @@ class DHT:
                 "host": self.host,
                 "port": self.port
             }
-            requests.post(url, json=payload, timeout=2)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=2) as resp:
+                    pass
             # If success, we add them? The response should validation.
         except:
             pass
@@ -207,7 +210,7 @@ class DHT:
 
     # Client Side Operations
 
-    def iterative_find_node(self, target_id: NodeId) -> List[Peer]:
+    async def iterative_find_node(self, target_id: NodeId) -> List[Peer]:
         # Kademlia Lookup Algorithm
         shortlist = self.routing_table.find_k_closest(target_id, ALPHA)
         tried_ids = set()
@@ -221,89 +224,93 @@ class DHT:
 
         closest_node = shortlist[0]
 
-        while True:
-            # Pick alpha nodes from shortlist that haven't been tried
-            candidates = [p for p in shortlist if p.id.hex()
-                          not in tried_ids][:ALPHA]
-            if not candidates:
-                break
+        async with aiohttp.ClientSession() as session:
+            while True:
+                # Pick alpha nodes from shortlist that haven't been tried
+                candidates = [p for p in shortlist if p.id.hex()
+                              not in tried_ids][:ALPHA]
+                if not candidates:
+                    break
 
-            updated = False
-            for peer in candidates:
-                tried_ids.add(peer.id.hex())
-                try:
-                    url = f"{peer.url}/dht/find_node"
-                    resp = requests.post(url, json={
-                        "target_id": target_id.hex(),
-                        "sender": self._my_info()
-                    }, timeout=1).json()
+                updated = False
+                for peer in candidates:
+                    tried_ids.add(peer.id.hex())
+                    try:
+                        url = f"{peer.url}/dht/find_node"
+                        async with session.post(url, json={
+                            "target_id": target_id.hex(),
+                            "sender": self._my_info()
+                        }, timeout=1) as resp:
+                            data = await resp.json()
+                            found_nodes = [Peer.from_dict(d) for d in data["nodes"]]
+                            for n in found_nodes:
+                                if n.id.hex() not in [p.id.hex() for p in shortlist]:
+                                    shortlist.append(n)
+                                    updated = True
+                    except:
+                        pass
 
-                    found_nodes = [Peer.from_dict(d) for d in resp["nodes"]]
-                    for n in found_nodes:
-                        if n.id.hex() not in [p.id.hex() for p in shortlist]:
-                            shortlist.append(n)
-                            updated = True
-                except:
-                    pass
+                shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
+                shortlist = shortlist[:K_BUCKET_SIZE]
 
-            shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
-            shortlist = shortlist[:K_BUCKET_SIZE]
-
-            if not updated:
-                break
+                if not updated:
+                    break
 
         return shortlist
 
-    def iterative_find_value(self, key: str) -> Optional[str]:
+    async def iterative_find_value(self, key: str) -> Optional[str]:
         target_id = NodeId.from_hex(key)
         shortlist = self.routing_table.find_k_closest(target_id, ALPHA)
         tried_ids = set()
 
-        while True:
-            candidates = [p for p in shortlist if p.id.hex()
-                          not in tried_ids][:ALPHA]
-            if not candidates:
-                break
+        async with aiohttp.ClientSession() as session:
+            while True:
+                candidates = [p for p in shortlist if p.id.hex()
+                              not in tried_ids][:ALPHA]
+                if not candidates:
+                    break
 
-            for peer in candidates:
-                tried_ids.add(peer.id.hex())
-                try:
-                    url = f"{peer.url}/dht/find_value"
-                    resp = requests.post(url, json={
-                        "key": key,
-                        "sender": self._my_info()
-                    }, timeout=1).json()
+                for peer in candidates:
+                    tried_ids.add(peer.id.hex())
+                    try:
+                        url = f"{peer.url}/dht/find_value"
+                        async with session.post(url, json={
+                            "key": key,
+                            "sender": self._my_info()
+                        }, timeout=1) as resp:
+                            data = await resp.json()
 
-                    if "value" in resp:
-                        return resp["value"]
+                            if "value" in data:
+                                return data["value"]
 
-                    found_nodes = [Peer.from_dict(d)
-                                   for d in resp.get("nodes", [])]
-                    for n in found_nodes:
-                        if n.id.hex() not in [p.id.hex() for p in shortlist]:
-                            shortlist.append(n)
+                            found_nodes = [Peer.from_dict(d)
+                                           for d in data.get("nodes", [])]
+                            for n in found_nodes:
+                                if n.id.hex() not in [p.id.hex() for p in shortlist]:
+                                    shortlist.append(n)
 
-                    shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
-                    shortlist = shortlist[:K_BUCKET_SIZE]
+                            shortlist.sort(key=lambda p: p.id.xor_distance(target_id))
+                            shortlist = shortlist[:K_BUCKET_SIZE]
 
-                except:
-                    pass
+                    except:
+                        pass
         return None
 
-    def put(self, key: str, value: str):
+    async def put(self, key: str, value: str):
         """Announce that 'value' (url) has 'key' (chunk_id) to the K closely nodes."""
         target_id = NodeId.from_hex(key)
-        nodes = self.iterative_find_node(target_id)
+        nodes = await self.iterative_find_node(target_id)
 
-        for peer in nodes:
-            try:
-                requests.post(f"{peer.url}/dht/store", json={
-                    "key": key,
-                    "value": value,
-                    "sender": self._my_info()
-                }, timeout=1)
-            except:
-                pass
+        async with aiohttp.ClientSession() as session:
+            for peer in nodes:
+                try:
+                    await session.post(f"{peer.url}/dht/store", json={
+                        "key": key,
+                        "value": value,
+                        "sender": self._my_info()
+                    }, timeout=1)
+                except:
+                    pass
 
     def _my_info(self):
         return {

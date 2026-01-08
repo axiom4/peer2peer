@@ -190,20 +190,47 @@ async def download_file(request):
         kill_node=None
     )
 
-    LOOP = asyncio.get_event_loop()
-    try:
-        await LOOP.run_in_executor(None, lambda: reconstruct(args))
+    task_id = str(uuid.uuid4())
+    TASKS[task_id] = {
+        "status": "processing",
+        "percent": 0,
+        "message": "Initializing download..."
+    }
 
-        if os.path.exists(output_path):
-            return web.json_response({
-                "status": "ok",
-                "message": "File reconstructed",
-                "download_url": f"/downloads/{output_name}"
-            })
-        else:
-            return web.json_response({"status": "error", "message": "Reconstruction produced no file"}, status=500)
-    except Exception as e:
-        return web.json_response({"status": "error", "message": str(e)}, status=500)
+    def progress_callback(percent, message):
+        if task_id in TASKS:
+            if percent == -1:
+                TASKS[task_id]["status"] = "error"
+                TASKS[task_id]["message"] = message
+            elif percent == 100:
+                TASKS[task_id]["status"] = "completed"
+                TASKS[task_id]["percent"] = 100
+                # Pass the download URL in the message or handle differently?
+                # The frontend polls this task. When completed, it wants the URL.
+                # We can add extra fields to the task dict.
+                TASKS[task_id]["message"] = message
+                TASKS[task_id]["download_url"] = f"/downloads/{output_name}"
+            else:
+                TASKS[task_id]["percent"] = percent
+                TASKS[task_id]["message"] = message
+
+    async def background_reconstruct():
+        LOOP = asyncio.get_running_loop()
+        try:
+            # Run blocking reconstruct in executor
+            await LOOP.run_in_executor(None, lambda: reconstruct(args, progress_callback))
+        except Exception as e:
+            TASKS[task_id]["status"] = "error"
+            TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
+
+    # Fire and forget
+    asyncio.create_task(background_reconstruct())
+
+    return web.json_response({
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Download started"
+    })
 
 
 async def repair_file(request):
@@ -465,6 +492,72 @@ async def delete_manifest(request):
     return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested chunk deletion on network."})
 
 
+async def stream_download(request):
+    """Streams a file directly to the client without saving to disk."""
+    manifest_name = request.match_info['name']
+    
+    # Auto-append extension if missing
+    if not manifest_name.endswith('.manifest'):
+        manifest_name += '.manifest'
+        
+    manifest_path = os.path.join('manifests', manifest_name)
+    if not os.path.exists(manifest_path):
+        return web.Response(status=404, text="Manifest not found")
+
+    # Load manifest to get filename
+    try:
+        with open(manifest_path, 'r') as f:
+            manifest_data = json.load(f)
+            original_filename = manifest_data.get('filename', 'downloaded_file')
+    except:
+        original_filename = 'downloaded_file'
+
+    args = SimpleNamespace(
+        manifest=manifest_path,
+        output="dummy_output",
+        entry_node=None,
+        scan=True,
+        local=False,
+        kill_node=None
+    )
+
+    loop = asyncio.get_event_loop()
+    
+    try:
+        # Run blocking reconstruction in thread pool to avoid blocking the event loop
+        result = await loop.run_in_executor(
+            None, 
+            lambda: reconstruct(args, progress_callback=None, stream=True)
+        )
+        
+        if not result:
+             return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
+             
+        shard_mgr, chunks_data = result
+        
+    except Exception as e:
+        return web.Response(status=500, text=f"Internal Error: {str(e)}")
+
+    # Prepare Stream Response
+    headers = {
+        "Content-Disposition": f'attachment; filename="{original_filename}"',
+        "Content-Type": "application/octet-stream"
+    }
+
+    response = web.StreamResponse(headers=headers)
+    await response.prepare(request)
+
+    try:
+        for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data):
+            await response.write(chunk_data)
+        
+        await response.write_eof()
+    except Exception as e:
+        print(f"Streaming error: {e}")
+        
+    return response
+
+
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
     os.makedirs('downloads', exist_ok=True)
@@ -477,6 +570,7 @@ def start_web_server(port=8888):
         web.get('/', handle_index),
         web.get('/api/manifests', list_manifests),
         web.get('/api/manifests/{name}', get_manifest_detail),
+        web.get('/api/stream/{name}', stream_download),
         web.delete('/api/manifests/{name}', delete_manifest),
         web.post('/api/upload', upload_file),
         web.get('/api/progress/{task_id}', get_progress),

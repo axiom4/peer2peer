@@ -1,5 +1,4 @@
-import urllib.request
-import urllib.error
+import requests
 import json
 from typing import Optional, List
 from network.node import StorageNode
@@ -12,6 +11,11 @@ class RemoteHttpNode(StorageNode):
         self.url = url.rstrip('/')
         self.node_id = self.url  # Use URL as ID
         self._online = True  # Assume online, store/retrieve will verify
+        self.session = requests.Session()
+        # Tune connection pool
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=100)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
     def get_id(self) -> str:
         return self.node_id
@@ -26,14 +30,12 @@ class RemoteHttpNode(StorageNode):
         """
         try:
             url = f"{self.url}/peers"
-            req = urllib.request.Request(url, method='GET')
-            req.add_header('Connection', 'close')
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    data = json.loads(response.read())
-                    return data.get('peers', [])
-                return []
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
+            resp = self.session.get(url, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get('peers', [])
+            return []
+        except Exception:
             # If we can't get peers due to network/parsing issues, return empty list
             return []
 
@@ -43,25 +45,19 @@ class RemoteHttpNode(StorageNode):
         """
         try:
             url = f"{self.url}/chunks"
-            req = urllib.request.Request(url, method='GET')
-            req.add_header('Connection', 'close')
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    data = json.loads(response.read())
-                    return data.get('chunks', [])
-                return []
+            resp = self.session.get(url, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get('chunks', [])
+            return []
         except Exception:
             return []
 
     def store(self, chunk_id: str, data: bytes) -> bool:
-        # Use standard urllib to avoid issues with nested asyncio loops and overhead
         try:
             url = f"{self.url}/chunk/{chunk_id}"
-            req = urllib.request.Request(url, data=data, method='PUT')
-            # Close connection explicitly
-            req.add_header('Connection', 'close')
-            with urllib.request.urlopen(req, timeout=5) as response:
-                return response.status == 200
+            resp = self.session.put(url, data=data, timeout=10)
+            return resp.status_code == 200
         except Exception as e:
             # print(f"Node {self.url} error: {e}")
             return False
@@ -70,33 +66,21 @@ class RemoteHttpNode(StorageNode):
         """Checks if a chunk exists on this node (HEAD request)."""
         try:
             url = f"{self.url}/chunk/{chunk_id}"
-            req = urllib.request.Request(url, method='HEAD')
-            req.add_header('Connection', 'close')
-            with urllib.request.urlopen(req, timeout=2) as response:
-                return response.status == 200
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return False
-            return False
+            resp = self.session.head(url, timeout=2)
+            return resp.status_code == 200
         except Exception:
             return False
 
     def retrieve(self, chunk_id: str) -> bytes:
         try:
             url = f"{self.url}/chunk/{chunk_id}"
-            # Close connection explicitly to avoid socket exhaustion
-            req = urllib.request.Request(url, method='GET')
-            req.add_header('Connection', 'close')
-
-            with urllib.request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    return response.read()
-                else:
-                    raise Exception(f"Status {response.status}")
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                raise FileNotFoundError(
-                    f"Chunk {chunk_id} not found on {self.url}")
-            raise e
+            resp = self.session.get(url, timeout=10)
+            
+            if resp.status_code == 200:
+                return resp.content
+            elif resp.status_code == 404:
+                raise FileNotFoundError(f"Chunk {chunk_id} not found on {self.url}")
+            else:
+                raise Exception(f"Status {resp.status_code}")
         except Exception as e:
             raise e

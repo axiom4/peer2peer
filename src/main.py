@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import asyncio
+import hashlib
 import concurrent.futures
 from typing import List
 from core.crypto import CryptoManager
@@ -228,7 +229,7 @@ def distribute(args, progress_callback=None):
             msg = f"Processing: {int(sharded_bytes/1024)}KB | Distributed: {int(processed_bytes/1024)}KB"
             progress_callback(pct, msg)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
 
         # 1. Pipeline Loop: Shard -> Submit -> Check Done (Interleaved)
         for chunk in chunk_generator:
@@ -281,56 +282,156 @@ def distribute(args, progress_callback=None):
     print(f"Manifest saved in: {manifest_path}")
 
 
-def reconstruct(args):
+def prepare_network_for_reconstruct(args, progress_callback=None):
+    """Refactored network discovery for reuse."""
+    if progress_callback:
+        progress_callback(10, "Discovering network...")
+
+    if args.entry_node:
+        print(f"Using manual entry node: {args.entry_node}")
+        return setup_remote_network(args.entry_node)
+    elif args.scan:
+        print("Auto-scanning network for recovery...")
+        found_peers = asyncio.run(scan_network())
+        if not found_peers:
+            msg = "No nodes found. Cannot start recovery."
+            print(msg)
+            if progress_callback:
+                progress_callback(-1, msg)
+            raise RuntimeError(msg)
+        print(f"Peers found: {found_peers}")
+        return [RemoteHttpNode(url) for url in found_peers]
+    elif args.local:
+        return setup_local_network()
+    else:
+        print("No network method specified. Trying local simulation.")
+        return setup_local_network()
+
+
+def collect_chunks_data(manifest, distributor, progress_callback=None):
+    chunks_data = []
+    print("Recovering chunks via network query (Query Flooding)...")
+
+    if progress_callback:
+        progress_callback(15, "Starting parallel download...")
+
+    def download_chunk_task(chunk_info):
+        chunk_id = chunk_info['id']
+        print(f"Searching Chunk {chunk_info['index']} ({chunk_id[:8]})...")
+        try:
+            encrypted_data = distributor.retrieve_chunk(chunk_id)
+
+            # INTEGRITY CHECK
+            computed_hash = hashlib.sha256(encrypted_data).hexdigest()
+            if computed_hash != chunk_id:
+                return None, f"Corruption in Chunk {chunk_info['index']}"
+
+            return {
+                "index": chunk_info['index'],
+                "data": encrypted_data
+            }, None
+        except Exception as e:
+            return None, f"Chunk {chunk_info['index']} Fetch Error: {e}"
+
+    print(f"Starting parallel upload (max 10 workers)...")
+    
+    total_chunks = len(manifest['chunks'])
+    completed_chunks = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_chunk = {executor.submit(
+            download_chunk_task, c): c for c in manifest['chunks']}
+
+        for future in concurrent.futures.as_completed(future_to_chunk):
+            result, error = future.result()
+            if error:
+                print(error)
+                if progress_callback:
+                    progress_callback(-1, f"Error: {error}")
+                raise RuntimeError(error)
+            
+            chunks_data.append(result)
+            completed_chunks += 1
+            if progress_callback:
+                pct = 15 + int((completed_chunks / total_chunks) * 75)
+                progress_callback(pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
+
+    chunks_data.sort(key=lambda x: x['index'])
+    return chunks_data
+
+
+def reconstruct(args, progress_callback=None, stream=False):
     """Recovery/reconstruction logic."""
     manifest_path = args.manifest
     output_path = args.output
 
     if not os.path.exists(manifest_path):
-        print(f"Error: Manifest {manifest_path} not found.")
-        return
+        raise FileNotFoundError(f"Error: Manifest {manifest_path} not found.")
 
-    # In real reconstruction, ideally knowing the entry node is not needed if we save full URLs in the manifest.
-    # But in our current design the manifest only has ID/URLs of the nodes.
-    # If we use LocalDirNode, IDs are "node_1". If RemoteHttpNode, IDs are "http://localhost:8080".
-    # So DistributionStrategy will work if we recreate the right objects.
-
-    # If the manifest contains full URLs, we can instantiate RemoteHttpNode on the fly.
-    # For simplicity, we rebuild the network as in distribute.
+    if progress_callback:
+        progress_callback(5, "Loading manifest...")
 
     meta_mgr = MetadataManager()
     manifest = meta_mgr.load_manifest(manifest_path)
 
-    # Network discovery for recovery
-    if args.entry_node:
-        print(f"Using manual entry node: {args.entry_node}")
-        nodes = setup_remote_network(args.entry_node)
-    elif args.scan:
-        print("Auto-scanning network for recovery...")
-        found_peers = asyncio.run(scan_network())
-        if not found_peers:
-            print("No nodes found. Cannot start recovery.")
-            return
-        print(f"Peers found: {found_peers}")
-        nodes = [RemoteHttpNode(url) for url in found_peers]
-    elif args.local:
-        # Force local mode
-        nodes = setup_local_network()
-    else:
-        # Smart fallback: infer if local or remote
-        # But WITHOUT reading locations from manifest (now empty/absent)
-        # Assume local mode if unspecified, for backward compatibility
-        print(
-            "No network method specified (--entry-node, --scan). Trying local simulation.")
-        nodes = setup_local_network()
+    try:
+        nodes = prepare_network_for_reconstruct(args, progress_callback)
+    except RuntimeError:
+        return None
 
     distributor = DistributionStrategy(nodes)
+    key = manifest['key'].encode('utf-8')
+    shard_mgr = ShardManager(key)
+
+    try:
+        chunks_data = collect_chunks_data(manifest, distributor, progress_callback)
+    except RuntimeError:
+        return None
+
+    if stream:
+        # Return necessary objects for streaming instead of writing to disk
+        return shard_mgr, chunks_data
+
+    if progress_callback:
+        progress_callback(90, "Reassembling file...")
+
+    def reassembly_monitor(done_chunks, total):
+        if progress_callback:
+            pct = 90 + int((done_chunks/total) * 10)
+            progress_callback(pct, f"Reassembling: {int((done_chunks/total)*100)}%")
+
+    shard_mgr.reconstruct_file(chunks_data, output_path, progress_cb=reassembly_monitor)
+
+    print(f"File reconstructed: {output_path}")
+    
+    if progress_callback:
+        progress_callback(100, "Download and reconstruction complete!")
+
+    # Verify Merkle
+    # ... (Keep existing verify logic from original code, omitted here for brevity if it was outside this function block in tool usage)
+    # The previous editing tool snapshot suggests we are overwriting reconstruct completely.
+    # I need to ensure I don't delete the Merkle check at the end.
+    
+    # Restoring Merkle Check logic manually since I'm overwriting the function
+    expected_root = manifest.get('merkle_root')
+    if expected_root:
+        chunk_ids = [c['id'] for c in manifest['chunks']]
+        verifier = MerkleTree(chunk_ids)
+        computed_root = verifier.get_root()
+        if computed_root == expected_root:
+            print("✅ INTEGRITY CHECK PASSED")
+        else:
+            print("❌ INTEGRITY CHECK FAILED")
+
 
     key = manifest['key'].encode('utf-8')
     shard_mgr = ShardManager(key)
 
     chunks_data = []
     print("Recovering chunks via network query (Query Flooding)...")
+
+    if progress_callback:
+        progress_callback(15, "Starting parallel download...")
 
     def download_chunk_task(chunk_info):
         chunk_id = chunk_info['id']
@@ -339,6 +440,13 @@ def reconstruct(args):
         try:
             # Call without locations -> Triggers network-wide search
             encrypted_data = distributor.retrieve_chunk(chunk_id)
+
+            # INTEGRITY CHECK: Verify hash matches ID (Merkle Proof for Leaf)
+            # The chunk ID is derived from the hash of the encrypted binary data.
+            computed_hash = hashlib.sha256(encrypted_data).hexdigest()
+            if computed_hash != chunk_id:
+                return None, f"Data Corruption detected in Chunk {chunk_info['index']}! Hash mismatch.\nExpected: {chunk_id}\nGot: {computed_hash}"
+
             return {
                 "index": chunk_info['index'],
                 "data": encrypted_data
@@ -346,10 +454,13 @@ def reconstruct(args):
         except Exception as e:
             return None, f"  -> FATAL ERROR Chunk {chunk_info['index']}: {e}"
 
-    print(f"Starting parallel upload (max 5 workers)...")
+    print(f"Starting parallel upload (max 20 workers)...")
+    
+    total_chunks = len(manifest['chunks'])
+    completed_chunks = 0
 
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             future_to_chunk = {executor.submit(
                 download_chunk_task, c): c for c in manifest['chunks']}
 
@@ -358,14 +469,39 @@ def reconstruct(args):
                 if error:
                     print(error)
                     print("Stopping recovery due to fatal error.")
+                    if progress_callback:
+                        progress_callback(-1, f"Error: {error}")
                     executor.shutdown(wait=False, cancel_futures=True)
                     return
                 chunks_data.append(result)
+                
+                completed_chunks += 1
+                if progress_callback:
+                    # Map progress from 15% to 90%
+                    pct = 15 + int((completed_chunks / total_chunks) * 75)
+                    progress_callback(pct, f"Downloaded chunk {completed_chunks}/{total_chunks}")
 
         # Important: reorder chunks before rebuilding!
         chunks_data.sort(key=lambda x: x['index'])
 
+        if progress_callback:
+            progress_callback(90, "Reassembling file...")
+
+        def reassembly_monitor(done_chunks, total):
+            if progress_callback:
+                # Map progress from 90% to 100%
+                pct = 90 + int((done_chunks/total) * 10)
+                progress_callback(pct, f"Reassembling: {int((done_chunks/total)*100)}%")
+
+        # Reassemble the file
+        shard_mgr.reconstruct_file(chunks_data, output_path, progress_cb=reassembly_monitor)
+
         print(f"File reconstructed: {output_path}")
+        
+        if progress_callback:
+            progress_callback(100, "Download and reconstruction complete!")
+
+        # --- Merkle Verification ---
 
         # --- Merkle Verification ---
         expected_root = manifest.get('merkle_root')

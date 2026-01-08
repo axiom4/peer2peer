@@ -1,11 +1,12 @@
 import os
 import hashlib
 import lzma
+import zlib
 import base64
 from typing import List, Dict, Generator
 from .crypto import CryptoManager
 
-CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks
 
 
 class ShardManager:
@@ -30,7 +31,9 @@ class ShardManager:
 
                 # Compresses the chunk (Standard compression for speed/ratio balance)
                 if compression:
-                    processed_data = lzma.compress(data)
+                    # Switch to zlib (DEFLATE) for much faster performance than LZMA
+                    # at the cost of slightly lower compression ratio.
+                    processed_data = zlib.compress(data)
                 else:
                     processed_data = data
 
@@ -54,7 +57,7 @@ class ShardManager:
                 yield chunk_info
                 index += 1
 
-    def reconstruct_file(self, chunks: List[Dict[str, any]], output_path: str):
+    def reconstruct_file(self, chunks: List[Dict[str, any]], output_path: str, progress_cb=None):
         """
         Reconstructs the original file from encrypted chunks.
         Attempts decompression after decryption.
@@ -62,9 +65,10 @@ class ShardManager:
         """
         # Sort by index for safety
         chunks.sort(key=lambda x: x['index'])
+        total_chunks = len(chunks)
 
         with open(output_path, 'wb') as f:
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 raw_data = chunk['data']
 
                 # Format detection: Fernet Binary starts with 0x80, Fernet B64 starts with 'g' (103)
@@ -78,10 +82,42 @@ class ShardManager:
                 decrypted_data = self.crypto.decrypt(token_to_decrypt)
 
                 try:
-                    # Attempt decompression
-                    data_to_write = lzma.decompress(decrypted_data)
+                    # Attempt decompression (Auto-detect format)
+                    # First try zlib (fast)
+                    try:
+                        data_to_write = zlib.decompress(decrypted_data)
+                    except zlib.error:
+                        # Fallback to lzma (legacy chunks)
+                        data_to_write = lzma.decompress(decrypted_data)
                 except lzma.LZMAError:
                     # Fallback for old uncompressed chunks (backward compatibility)
                     data_to_write = decrypted_data
 
                 f.write(data_to_write)
+                
+                if progress_cb and i % 5 == 0:
+                   progress_cb(i, total_chunks)
+
+    def yield_reconstructed_chunks(self, chunks: List[Dict[str, any]]) -> Generator[bytes, None, None]:
+        """
+        Yields decrypted bytes of the file in order, without writing to disk.
+        """
+        chunks.sort(key=lambda x: x['index'])
+
+        for chunk in chunks:
+            raw_data = chunk['data']
+            if raw_data and raw_data[0] == 0x80:
+                token_to_decrypt = base64.urlsafe_b64encode(raw_data)
+            else:
+                token_to_decrypt = raw_data
+
+            decrypted_data = self.crypto.decrypt(token_to_decrypt)
+            try:
+                try:
+                    data = zlib.decompress(decrypted_data)
+                except zlib.error:
+                    data = lzma.decompress(decrypted_data)
+            except lzma.LZMAError:
+                data = decrypted_data
+
+            yield data

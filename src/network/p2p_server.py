@@ -22,7 +22,7 @@ class P2PServer:
         self.port = port
         self.storage_dir = storage_dir
         self.peers = set()
-        self.max_peers = 10  # Increased for DHT connectivity
+        self.max_peers = 25  # Increased for DHT connectivity
         self.seen_requests = collections.deque(maxlen=1000)  # Loop prevention
 
         # Initialize DHT
@@ -101,7 +101,7 @@ class P2PServer:
         peers_list = list(self.peers)
         if peers_list:
             logger.info(f"Bootstrapping DHT with {len(peers_list)} peers...")
-            self.dht.bootstrap(peers_list)
+            await self.dht.bootstrap(peers_list)
 
     async def start(self):
         # Start UDP Discovery
@@ -115,7 +115,7 @@ class P2PServer:
 
         if self.known_peer:
             await self.join_network(self.known_peer)
-            self.dht.bootstrap([self.known_peer])
+            await self.dht.bootstrap([self.known_peer])
             logger.info(f"Bootstrapped DHT from known peer {self.known_peer}")
 
         # Periodic sync with discovery service
@@ -130,7 +130,7 @@ class P2PServer:
         while True:
             # Sync DHT occasionally
             if len(self.peers) > 0 and random.random() < 0.2:  # 20% chance every loop
-                self.dht.bootstrap(list(self.peers))
+                await self.dht.bootstrap(list(self.peers))
 
             # If I already have enough peers, don't actively search for new ones
             if len(self.peers) >= self.max_peers:
