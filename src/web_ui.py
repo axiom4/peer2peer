@@ -593,12 +593,13 @@ async def stream_download(request):
 
     return response
 
+
 async def stream_download_by_id(request):
     """Streams a file directly by ID, fetching the manifest first."""
     manifest_id = request.match_info['id']
 
     args = SimpleNamespace(
-        manifest=manifest_id, # reconstruct handles ID automatically
+        manifest=manifest_id,  # reconstruct handles ID automatically
         output="dummy_output",
         entry_node=None,
         scan=True,
@@ -619,9 +620,10 @@ async def stream_download_by_id(request):
             return web.Response(status=500, text="Reconstruction failed (Chunks missing)")
 
         shard_mgr, chunks_data, compression_mode, manifest_obj = result
-        
+
         # Get filename directly from in-memory manifest object
-        original_filename = manifest_obj.get('filename', f"downloaded_{manifest_id}.bin")
+        original_filename = manifest_obj.get(
+            'filename', f"downloaded_{manifest_id}.bin")
 
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {str(e)}")
@@ -650,8 +652,9 @@ async def get_manifest_by_id(request):
     peers = await scan_network()
     if not peers:
         # Fallback to defaults if scan fails
-        peers = ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://127.0.0.1:8002']
-    
+        peers = ['http://127.0.0.1:8000',
+                 'http://127.0.0.1:8001', 'http://127.0.0.1:8002']
+
     # Crawl to find more peers for robust retrieval and better graph
     queue = list(peers)
     visited = set(peers)
@@ -682,7 +685,7 @@ async def get_manifest_by_id(request):
     # 2. Fetch Manifest
     try:
         manifest_data_bytes = await asyncio.get_event_loop().run_in_executor(
-             None, lambda: distributor.retrieve_chunk(manifest_id)
+            None, lambda: distributor.retrieve_chunk(manifest_id)
         )
         data = json.loads(manifest_data_bytes)
     except Exception as e:
@@ -722,21 +725,21 @@ def start_web_server(port=8888):
             # 1. Quick discovery of some entry nodes
             peers = await scan_network()
             if not peers:
-                 # Fallback if scan fails
-                 peers = [] 
-            
+                # Fallback if scan fails
+                peers = []
+
             nodes = [RemoteHttpNode(u) for u in peers]
-            
+
             # If no nodes, try localhost:8000 as default entry
             if not nodes:
                 nodes.append(RemoteHttpNode("http://127.0.0.1:8000"))
-                
+
             cat = CatalogClient()
             items = await cat.fetch(nodes)
-            
+
             # Returns list of {id, name, size, ts}
             return web.json_response(items)
-            
+
         except Exception as e:
             print(f"Catalog fetch error: {e}")
             return web.json_response({"error": str(e)}, status=500)

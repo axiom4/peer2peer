@@ -108,7 +108,8 @@ class P2PServer:
         await asyncio.sleep(5)
         my_url = f"http://{self.host}:{self.port}"
         try:
-            chunks = [f for f in os.listdir(self.storage_dir) if not f.startswith('.')]
+            chunks = [f for f in os.listdir(
+                self.storage_dir) if not f.startswith('.')]
             if chunks:
                 logger.info(f"DHT: Announcing {len(chunks)} stored chunks...")
                 for chunk_id in chunks:
@@ -250,7 +251,7 @@ class P2PServer:
 
         # 2a. DHT Search (New)
         logger.info(f"Chunk {chunk_id} missing. Querying DHT...")
-        
+
         # DHT call is async, await directly
         try:
             owner_url = await self.dht.iterative_find_value(chunk_id)

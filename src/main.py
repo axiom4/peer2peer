@@ -151,56 +151,58 @@ def prune_orphans(args=None):
     try:
         # Define async helper to fetch catalog and parse remote manifests
         async def _sync_catalog_refs():
-             print("Scanning network for Public Catalog...")
-             peers = await scan_network(timeout=2)
-             if not peers:
-                 # Fallback
-                 peers = ['http://127.0.0.1:8000']
-             
-             nodes = [RemoteHttpNode(p) for p in peers]
-             
-             # Fetch Catalog List
-             cat = CatalogClient()
-             items = await cat.fetch(nodes)
-             print(f"Catalog contains {len(items)} items.")
-             
-             new_refs = set()
-             
-             # 1. Protect Manifest IDs themselves
-             for item in items:
-                 new_refs.add(item['id'])
-                 
-             # 2. Protect Chunks referenced by these Manifests
-             # Optimization: We scan local disks to find the Manifest Body 
-             # instead of downloading from network (since we are pruning local data).
-             
-             for item in items:
-                 m_id = item['id']
-                 # Look for this file in any node_data dir
-                 found_loc = False
-                 for node_dir in os.listdir(network_data_dir):
-                     maybe_path = os.path.join(network_data_dir, node_dir, m_id)
-                     if os.path.exists(maybe_path):
-                         try:
-                             with open(maybe_path, 'rb') as f:
-                                 m_data = json.load(f)
-                                 for c in m_data.get('chunks', []):
-                                     new_refs.add(c['id'])
-                             found_loc = True
-                             break # Found valid copy, no need to check other nodes
-                         except:
-                             pass
-                 
-                 if not found_loc:
-                     print(f"Warning: Manifest {m_id} not found locally during prune scan. Referencing chunks might be lost if not shared.")
-                     
-             return new_refs
+            print("Scanning network for Public Catalog...")
+            peers = await scan_network(timeout=2)
+            if not peers:
+                # Fallback
+                peers = ['http://127.0.0.1:8000']
+
+            nodes = [RemoteHttpNode(p) for p in peers]
+
+            # Fetch Catalog List
+            cat = CatalogClient()
+            items = await cat.fetch(nodes)
+            print(f"Catalog contains {len(items)} items.")
+
+            new_refs = set()
+
+            # 1. Protect Manifest IDs themselves
+            for item in items:
+                new_refs.add(item['id'])
+
+            # 2. Protect Chunks referenced by these Manifests
+            # Optimization: We scan local disks to find the Manifest Body
+            # instead of downloading from network (since we are pruning local data).
+
+            for item in items:
+                m_id = item['id']
+                # Look for this file in any node_data dir
+                found_loc = False
+                for node_dir in os.listdir(network_data_dir):
+                    maybe_path = os.path.join(network_data_dir, node_dir, m_id)
+                    if os.path.exists(maybe_path):
+                        try:
+                            with open(maybe_path, 'rb') as f:
+                                m_data = json.load(f)
+                                for c in m_data.get('chunks', []):
+                                    new_refs.add(c['id'])
+                            found_loc = True
+                            break  # Found valid copy, no need to check other nodes
+                        except:
+                            pass
+
+                if not found_loc:
+                    print(
+                        f"Warning: Manifest {m_id} not found locally during prune scan. Referencing chunks might be lost if not shared.")
+
+            return new_refs
 
         # Run async logic
         catalog_refs = asyncio.run(_sync_catalog_refs())
         valid_chunks.update(catalog_refs)
-        print(f"Total valid chunks (including Public Catalog): {len(valid_chunks)}")
-        
+        print(
+            f"Total valid chunks (including Public Catalog): {len(valid_chunks)}")
+
     except Exception as e:
         print(f"Warning: Could not sync with public catalog: {e}")
 
@@ -261,9 +263,11 @@ def start_server(args):
 
 class CatalogClient:
     """Helper to interact with the Distributed Catalog via DHT."""
+
     def __init__(self, dht=None):
-        self.dht = dht # Needs access to a DHT instance (usually from P2PServer or Standalone)
-    
+        # Needs access to a DHT instance (usually from P2PServer or Standalone)
+        self.dht = dht
+
     def get_catalog_key(self):
         # Simplification: Single global bucket for prototype
         # In prod: bucket by date or first char of filename
@@ -272,43 +276,44 @@ class CatalogClient:
     async def publish(self, manifest_id, filename, size, distributor_nodes):
         """
         Publishes a manifest to the public catalog.
-        
+
         Since we don't have a running P2PServer instance in CLI mode usually, 
         we use the Distributor's nodes to execute DHT STORE commands remotely.
         """
         key = self.get_catalog_key()
         # Prefix key for special handling in dht.py
-        dht_key = "catalog_" + key[:56] 
-        
+        dht_key = "catalog_" + key[:56]
+
         entry = json.dumps({
             "id": manifest_id,
             "name": filename,
             "size": size,
             "ts": int(time.time())
         })
-        
+
         print(f"Publishing to Catalog Key: {dht_key}")
-        
+
         # We need to find nodes responsible for this key, or just broadcast to 5 random nodes
-        # For simplicity in this hybrid model, we send STORE to random nodes we know, 
+        # For simplicity in this hybrid model, we send STORE to random nodes we know,
         # hoping they participate in the DHT.
-        
+
         success_count = 0
         import aiohttp
-        
+
         client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
-        client_info = {"sender_id": client_id_hex, "host": "127.0.0.1", "port": 0}
+        client_info = {"sender_id": client_id_hex,
+                       "host": "127.0.0.1", "port": 0}
 
         async with aiohttp.ClientSession() as session:
             # Try to publish to up to 20 nodes to ensure propagation
-            targets = distributor_nodes[:20] 
+            targets = distributor_nodes[:20]
             for node in targets:
                 try:
                     url = f"{node.url}/dht/store"
                     # We spoof sender for now as we are a CLI client without a permanent port usually
                     payload = {
                         "key": dht_key,
-                        "value": entry, 
+                        "value": entry,
                         "sender": client_info
                     }
                     async with session.post(url, json=payload, timeout=2) as resp:
@@ -316,7 +321,7 @@ class CatalogClient:
                             success_count += 1
                 except Exception as e:
                     pass
-                    
+
         if success_count > 0:
             print(f"✅ Published to Catalog on {success_count} nodes.")
         else:
@@ -328,19 +333,20 @@ class CatalogClient:
         """
         key = self.get_catalog_key()
         dht_key = "catalog_" + key[:56]
-        
+
         print(f"Fetching Catalog from {dht_key}...")
-        
+
         client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
-        client_info = {"sender_id": client_id_hex, "host": "127.0.0.1", "port": 0}
-        
+        client_info = {"sender_id": client_id_hex,
+                       "host": "127.0.0.1", "port": 0}
+
         catalogs = []
         import aiohttp
         async with aiohttp.ClientSession() as session:
             # Query multiple nodes because DHT propagation might be slow or partial
             random.shuffle(distributor_nodes)
-            targets = distributor_nodes[:20] 
-            
+            targets = distributor_nodes[:20]
+
             for node in targets:
                 try:
                     url = f"{node.url}/dht/find_value"
@@ -358,7 +364,7 @@ class CatalogClient:
                                 catalogs.append(val)
                 except Exception:
                     pass
-        
+
         # Deduplicate
         unique = {}
         for c in catalogs:
@@ -367,7 +373,7 @@ class CatalogClient:
                 unique[obj['id']] = obj
             except:
                 pass
-                
+
         return list(unique.values())
 
 
@@ -509,13 +515,13 @@ def distribute(args, progress_callback=None):
     # Sort by index to keep manifest clean
     chunks_info_for_manifest.sort(key=lambda x: x['index'])
 
-    meta_mgr = MetadataManager(manifest_dir=None) # Start serverless
+    meta_mgr = MetadataManager(manifest_dir=None)  # Start serverless
     manifest_dict = meta_mgr.create_manifest(
         os.path.basename(file_path), key, chunks_info_for_manifest, compression=use_compression)
 
     # --- Distribute Manifest (Cloud) ---
     print("Uploading Manifest to Network...")
-    
+
     # Serialize to memory only - No local file in 'manifests/'
     manifest_bytes = json.dumps(manifest_dict).encode('utf-8')
 
@@ -527,25 +533,27 @@ def distribute(args, progress_callback=None):
     except Exception as e:
         print(f"⚠️  Failed to distribute manifest: {e}")
         manifest_id = "UPLOAD_FAILED"
-    
+
     # --- Publish to Public Catalog (Optional) ---
     if manifest_id != "UPLOAD_FAILED":
         try:
-             # Pass the raw RemoteHttpNode list used by distributor
-             active_nodes = distributor.nodes
-             
-             # Filter only Remote nodes (LocalDirNode doesn't support HTTP catalog)
-             remote_nodes = [n for n in active_nodes if hasattr(n, 'url')]
-             
-             if remote_nodes:
-                 print("Publishing to Public Catalog...")
-                 cat = CatalogClient()
-                 asyncio.run(cat.publish(
-                     manifest_id, 
-                     os.path.basename(file_path),
-                     chunks_info_for_manifest[-1].get('original_size', 0) * len(chunks_info_for_manifest), # approx size
-                     remote_nodes
-                 ))
+            # Pass the raw RemoteHttpNode list used by distributor
+            active_nodes = distributor.nodes
+
+            # Filter only Remote nodes (LocalDirNode doesn't support HTTP catalog)
+            remote_nodes = [n for n in active_nodes if hasattr(n, 'url')]
+
+            if remote_nodes:
+                print("Publishing to Public Catalog...")
+                cat = CatalogClient()
+                asyncio.run(cat.publish(
+                    manifest_id,
+                    os.path.basename(file_path),
+                    # approx size
+                    chunks_info_for_manifest[-1].get(
+                        'original_size', 0) * len(chunks_info_for_manifest),
+                    remote_nodes
+                ))
         except Exception as e:
             print(f"Catalog publish error: {e}")
     # --------------------------------------------
@@ -672,10 +680,10 @@ def reconstruct(args, progress_callback=None, stream=False):
 
     if progress_callback:
         progress_callback(5, "Loading manifest...")
-    
+
     if not manifest_obj:
-         manifest_obj = meta_mgr.load_manifest(manifest_path)
-         
+        manifest_obj = meta_mgr.load_manifest(manifest_path)
+
     manifest = manifest_obj
 
     key = manifest['key'].encode('utf-8')
@@ -843,13 +851,13 @@ def catalog_cmd(args):
     Lists files available in the public network catalog.
     """
     print("Fetching Global Catalog...")
-    
+
     # 1. Bootstrat Network connection
     if args.entry_node:
         nodes = setup_remote_network(args.entry_node)
     elif args.scan:
-         found = asyncio.run(scan_network())
-         nodes = [RemoteHttpNode(u) for u in found]
+        found = asyncio.run(scan_network())
+        nodes = [RemoteHttpNode(u) for u in found]
     else:
         print("Please provide --entry-node or --scan to find the network.")
         return
@@ -860,17 +868,18 @@ def catalog_cmd(args):
 
     cat = CatalogClient()
     items = asyncio.run(cat.fetch(nodes))
-    
+
     print(f"\n--- 🌍 Public Network Catalog ({len(items)} files) ---")
     print(f"{'MANIFEST ID':<66} | {'SIZE (B)':<10} | {'FILENAME':<30}")
     print("-" * 115)
-    
+
     for item in items:
         # Check integrity
         if 'id' not in item or 'name' not in item:
             continue
-            
-        print(f"{item['id']:<66} | {item.get('size', 0):<10} | {item['name']:<30}")
+
+        print(
+            f"{item['id']:<66} | {item.get('size', 0):<10} | {item['name']:<30}")
     print("-" * 115)
     print("Use 'reconstruct <MANIFEST_ID> output_file' to download.\n")
 
@@ -911,9 +920,10 @@ def main():
                             help="Use local simulation (default if unspecified)")
     rec_parser.add_argument(
         "--kill-node", help="Local crash simulation", default=None)
-        
+
     # Command: CATALOG
-    cat_parser = subparsers.add_parser("catalog", help="List public files in network")
+    cat_parser = subparsers.add_parser(
+        "catalog", help="List public files in network")
     cat_parser.add_argument(
         "--entry-node", help="Optional: Node URL for discovery")
     cat_parser.add_argument("--scan", action="store_true",

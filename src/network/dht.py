@@ -1,3 +1,5 @@
+import os
+import json
 import hashlib
 import heapq
 import time
@@ -138,9 +140,6 @@ class RoutingTable:
         return all_peers[:k]
 
 
-import json
-import os
-
 class DHT:
     def __init__(self, host: str, port: int, storage_dir: str):
         self.node_id = NodeId.from_str(f"{host}:{port}")
@@ -150,10 +149,10 @@ class DHT:
         self.routing_table = RoutingTable(self.node_id)
         # chunk_id -> provider_url (Indexing)
         self.storage: Dict[str, str] = {}
-        
+
         self.db_path = os.path.join(storage_dir, "dht_index.json")
         self._load_db()
-        
+
     def _load_db(self):
         if os.path.exists(self.db_path):
             try:
@@ -164,10 +163,10 @@ class DHT:
 
     def _save_db(self):
         try:
-             with open(self.db_path, 'w') as f:
-                 json.dump(self.storage, f)
+            with open(self.db_path, 'w') as f:
+                json.dump(self.storage, f)
         except Exception as e:
-             logger.error(f"Failed to save DHT DB: {e}")
+            logger.error(f"Failed to save DHT DB: {e}")
         # Note: Local chunks are also implicit storage? No, this is the DHT index.
 
     async def bootstrap(self, peers: List[str]):
@@ -226,29 +225,29 @@ class DHT:
         except ValueError:
             # Handle special keys like "catalog_" by hashing them to get a valid ID
             target_id = NodeId.from_str(key_hex)
-            
+
         closest = self.routing_table.find_k_closest(target_id)
         return {"nodes": [p.to_dict() for p in closest]}
 
     def handle_store(self, key_hex: str, value: str, sender_info: dict):
         self.handle_ping(sender_info)
-        
+
         # CATALOG FEATURE: List Append
         # If the value is a specific JSON command to append to a list
         if key_hex.startswith("catalog_"):
-             if key_hex not in self.storage:
-                 self.storage[key_hex] = [] # Initialize as list
-             
-             if isinstance(self.storage[key_hex], list):
-                 # Avoid duplicates
-                 if value not in self.storage[key_hex]:
-                     self.storage[key_hex].append(value)
-                     # Cap size to prevent abuse (e.g. 50 items per bucket)
-                     if len(self.storage[key_hex]) > 50:
-                         self.storage[key_hex].pop(0)
-             self._save_db()
-             return {"status": "ok"}
-        
+            if key_hex not in self.storage:
+                self.storage[key_hex] = []  # Initialize as list
+
+            if isinstance(self.storage[key_hex], list):
+                # Avoid duplicates
+                if value not in self.storage[key_hex]:
+                    self.storage[key_hex].append(value)
+                    # Cap size to prevent abuse (e.g. 50 items per bucket)
+                    if len(self.storage[key_hex]) > 50:
+                        self.storage[key_hex].pop(0)
+            self._save_db()
+            return {"status": "ok"}
+
         self.storage[key_hex] = value
         self._save_db()
         return {"status": "ok"}

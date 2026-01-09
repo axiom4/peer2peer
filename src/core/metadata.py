@@ -8,10 +8,10 @@ class MetadataManager:
         self.manifest_dir = manifest_dir
         # Only create if we intend to use it, let's defer creation or check usage
         if manifest_dir and not os.path.exists(self.manifest_dir):
-             try:
-                 os.makedirs(self.manifest_dir)
-             except OSError:
-                 pass # Handling permissions or readonly scenarios
+            try:
+                os.makedirs(self.manifest_dir)
+            except OSError:
+                pass  # Handling permissions or readonly scenarios
 
     def create_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True) -> dict:
         """Creates the manifest structure in memory."""
@@ -42,7 +42,8 @@ class MetadataManager:
 
     def save_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True):
         """Saves the file manifest to disk."""
-        manifest = self.create_manifest(filename, key, chunks_info, compression)
+        manifest = self.create_manifest(
+            filename, key, chunks_info, compression)
 
         manifest_path = os.path.join(self.manifest_dir, f"{filename}.manifest")
         with open(manifest_path, 'w') as f:
