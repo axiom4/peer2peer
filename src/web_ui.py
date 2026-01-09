@@ -9,26 +9,32 @@ from types import SimpleNamespace
 # Determine imports based on execution context
 try:
     # If running as module or from root
-    from src.main import distribute, reconstruct, prune_orphans
+    from src.main import distribute, reconstruct, prune_orphans, CatalogClient
     from src.network.discovery import scan_network
     from src.core.repair import RepairManager
     from src.core.metadata import MetadataManager
+    from src.network.remote_node import RemoteHttpNode
+    from src.core.distribution import DistributionStrategy
 except ImportError:
     try:
         # If running from src directory
-        from main import distribute, reconstruct, prune_orphans
+        from main import distribute, reconstruct, prune_orphans, CatalogClient
         from network.discovery import scan_network
         from core.repair import RepairManager
         from core.metadata import MetadataManager
+        from network.remote_node import RemoteHttpNode
+        from core.distribution import DistributionStrategy
     except ImportError as e:
         print(f"Import Error: {e}")
         # Last resort for direct execution
         import sys
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        from src.main import distribute, reconstruct, prune_orphans
+        from src.main import distribute, reconstruct, prune_orphans, CatalogClient
+        from src.core.distribution import DistributionStrategy
         from src.network.discovery import scan_network
         from src.core.repair import RepairManager
         from src.core.metadata import MetadataManager
+        from src.network.remote_node import RemoteHttpNode
 
 
 import uuid
@@ -565,7 +571,7 @@ async def stream_download(request):
         if not result:
             return web.Response(status=500, text="Reconstruction failed (Nodes not found or chunks missing)")
 
-        shard_mgr, chunks_data, compression_mode = result
+        shard_mgr, chunks_data, compression_mode, manifest_obj = result
 
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {str(e)}")
@@ -587,6 +593,118 @@ async def stream_download(request):
 
     return response
 
+async def stream_download_by_id(request):
+    """Streams a file directly by ID, fetching the manifest first."""
+    manifest_id = request.match_info['id']
+
+    args = SimpleNamespace(
+        manifest=manifest_id, # reconstruct handles ID automatically
+        output="dummy_output",
+        entry_node=None,
+        scan=True,
+        local=False,
+        kill_node=None
+    )
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        # Run blocking reconstruction in thread pool
+        result = await loop.run_in_executor(
+            None,
+            lambda: reconstruct(args, progress_callback=None, stream=True)
+        )
+
+        if not result:
+            return web.Response(status=500, text="Reconstruction failed (Chunks missing)")
+
+        shard_mgr, chunks_data, compression_mode, manifest_obj = result
+        
+        # Get filename directly from in-memory manifest object
+        original_filename = manifest_obj.get('filename', f"downloaded_{manifest_id}.bin")
+
+    except Exception as e:
+        return web.Response(status=500, text=f"Internal Error: {str(e)}")
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{original_filename}"',
+        "Content-Type": "application/octet-stream"
+    }
+
+    response = web.StreamResponse(headers=headers)
+    await response.prepare(request)
+
+    try:
+        for chunk_data in shard_mgr.yield_reconstructed_chunks(chunks_data, compression_mode=compression_mode):
+            await response.write(chunk_data)
+    except Exception as e:
+        print(f"Streaming error: {e}")
+
+    return response
+
+
+async def get_manifest_by_id(request):
+    manifest_id = request.match_info['id']
+
+    # 1. Generic scan attempt
+    peers = await scan_network()
+    if not peers:
+        # Fallback to defaults if scan fails
+        peers = ['http://127.0.0.1:8000', 'http://127.0.0.1:8001', 'http://127.0.0.1:8002']
+    
+    # Crawl to find more peers for robust retrieval and better graph
+    queue = list(peers)
+    visited = set(peers)
+
+    if queue:
+        async with aiohttp.ClientSession() as session:
+            crawl_tasks = []
+            for p in queue:
+                crawl_tasks.append(session.get(f"{p}/peers", timeout=0.8))
+
+            try:
+                responses = await asyncio.gather(*crawl_tasks, return_exceptions=True)
+                for res in responses:
+                    if not isinstance(res, Exception) and res.status == 200:
+                        try:
+                            p_data = await res.json()
+                            for extended_peer in p_data.get('peers', []):
+                                visited.add(extended_peer.rstrip('/'))
+                        except:
+                            pass
+            except:
+                pass
+
+    active_peers = list(visited)
+    nodes = [RemoteHttpNode(u) for u in active_peers]
+    distributor = DistributionStrategy(nodes)
+
+    # 2. Fetch Manifest
+    try:
+        manifest_data_bytes = await asyncio.get_event_loop().run_in_executor(
+             None, lambda: distributor.retrieve_chunk(manifest_id)
+        )
+        data = json.loads(manifest_data_bytes)
+    except Exception as e:
+        return web.json_response({"error": f"Failed to retrieve manifest {manifest_id}: {e}"}, status=404)
+
+    # 3. Location Lookup (Enrich with 'locations')
+    if active_peers:
+        async with aiohttp.ClientSession() as session:
+            chunk_tasks = []
+            for chunk in data['chunks']:
+                chunk_tasks.append(check_chunk_task(
+                    session, chunk['id'], active_peers))
+
+            # Execute all checks in parallel
+            results = await asyncio.gather(*chunk_tasks)
+            lookup = {cid: locs for cid, locs in results}
+
+            for chunk in data['chunks']:
+                chunk['locations'] = lookup.get(chunk['id'], [])
+
+    return web.json_response(data)
+
 
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
@@ -596,15 +714,45 @@ def start_web_server(port=8888):
     # Increase client_max_size for large uploads (e.g. 500MB)
     app._client_max_size = 500 * 1024 * 1024
 
+    async def fetch_catalog(request):
+        """
+        Fetches the global public catalog from the network.
+        """
+        try:
+            # 1. Quick discovery of some entry nodes
+            peers = await scan_network()
+            if not peers:
+                 # Fallback if scan fails
+                 peers = [] 
+            
+            nodes = [RemoteHttpNode(u) for u in peers]
+            
+            # If no nodes, try localhost:8000 as default entry
+            if not nodes:
+                nodes.append(RemoteHttpNode("http://127.0.0.1:8000"))
+                
+            cat = CatalogClient()
+            items = await cat.fetch(nodes)
+            
+            # Returns list of {id, name, size, ts}
+            return web.json_response(items)
+            
+        except Exception as e:
+            print(f"Catalog fetch error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     app.add_routes([
         web.get('/', handle_index),
         web.get('/api/manifests', list_manifests),
         web.get('/api/manifests/{name}', get_manifest_detail),
+        web.get('/api/manifests/id/{id}', get_manifest_by_id),
         web.get('/api/stream/{name}', stream_download),
+        web.get('/api/stream_id/{id}', stream_download_by_id),
         web.delete('/api/manifests/{name}', delete_manifest),
         web.post('/api/upload', upload_file),
         web.get('/api/progress/{task_id}', get_progress),
         web.post('/api/download', download_file),
+        web.get('/api/catalog', fetch_catalog),
         web.post('/api/repair', repair_file),
         web.post('/api/prune', clean_orphans),
         web.get('/api/network', get_network_graph),

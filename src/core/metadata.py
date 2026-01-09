@@ -6,12 +6,15 @@ from .merkle import MerkleTree
 class MetadataManager:
     def __init__(self, manifest_dir: str = "manifests"):
         self.manifest_dir = manifest_dir
-        if not os.path.exists(self.manifest_dir):
-            os.makedirs(self.manifest_dir)
+        # Only create if we intend to use it, let's defer creation or check usage
+        if manifest_dir and not os.path.exists(self.manifest_dir):
+             try:
+                 os.makedirs(self.manifest_dir)
+             except OSError:
+                 pass # Handling permissions or readonly scenarios
 
-    def save_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True):
-        """Saves the file manifest. This file MUST remain private to the owner."""
-
+    def create_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True) -> dict:
+        """Creates the manifest structure in memory."""
         # Ensure chunks are sorted by index for consistent Merkle Root
         chunks_info.sort(key=lambda x: x["index"])
 
@@ -20,23 +23,26 @@ class MetadataManager:
         merkle_tree = MerkleTree(chunk_ids)
         merkle_root = merkle_tree.get_root()
 
-        # Calculate total size if available in chunks metadata
+        # Calculate total size
         total_size = sum(c.get('original_size', 0) for c in chunks_info)
 
-        manifest = {
+        return {
             "filename": filename,
             "merkle_root": merkle_root,
             "size": total_size,
-            "key": key.decode('utf-8'),  # The key is needed to decrypt
-            "compression": compression,  # Algorithm info
+            "key": key.decode('utf-8'),
+            "compression": compression,
             "chunks": [
                 {
                     "index": c["index"],
                     "id": c["id"]
-                    # "locations" removed for privacy/distributed logic
                 } for c in chunks_info
             ]
         }
+
+    def save_manifest(self, filename: str, key: bytes, chunks_info: list, compression: bool = True):
+        """Saves the file manifest to disk."""
+        manifest = self.create_manifest(filename, key, chunks_info, compression)
 
         manifest_path = os.path.join(self.manifest_dir, f"{filename}.manifest")
         with open(manifest_path, 'w') as f:

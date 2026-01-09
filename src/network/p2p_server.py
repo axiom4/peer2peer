@@ -103,6 +103,19 @@ class P2PServer:
             logger.info(f"Bootstrapping DHT with {len(peers_list)} peers...")
             await self.dht.bootstrap(peers_list)
 
+    async def _announce_all_chunks(self):
+        # Give some time for neighbours to be discovered
+        await asyncio.sleep(5)
+        my_url = f"http://{self.host}:{self.port}"
+        try:
+            chunks = [f for f in os.listdir(self.storage_dir) if not f.startswith('.')]
+            if chunks:
+                logger.info(f"DHT: Announcing {len(chunks)} stored chunks...")
+                for chunk_id in chunks:
+                    asyncio.create_task(self.dht.put(chunk_id, my_url))
+        except Exception as e:
+            logger.error(f"Error announcing chunks: {e}")
+
     async def start(self):
         # Start UDP Discovery
         self.discovery.start()
@@ -117,6 +130,9 @@ class P2PServer:
             await self.join_network(self.known_peer)
             await self.dht.bootstrap([self.known_peer])
             logger.info(f"Bootstrapped DHT from known peer {self.known_peer}")
+
+        # Announce local chunks to DHT
+        asyncio.create_task(self._announce_all_chunks())
 
         # Periodic sync with discovery service
         asyncio.create_task(self._sync_discovery())
@@ -188,6 +204,10 @@ class P2PServer:
         with open(path, 'wb') as f:
             f.write(data)
 
+        # Announce to DHT (Async Fire-and-Forget)
+        my_url = f"http://{self.host}:{self.port}"
+        asyncio.create_task(self.dht.put(chunk_id, my_url))
+
         logger.info(f"Stored chunk {chunk_id}")
         return web.Response(text="Stored")
 
@@ -230,9 +250,13 @@ class P2PServer:
 
         # 2a. DHT Search (New)
         logger.info(f"Chunk {chunk_id} missing. Querying DHT...")
-        loop = asyncio.get_event_loop()
-        # Run synchronous DHT call in executor
-        owner_url = await loop.run_in_executor(None, self.dht.iterative_find_value, chunk_id)
+        
+        # DHT call is async, await directly
+        try:
+            owner_url = await self.dht.iterative_find_value(chunk_id)
+        except Exception as e:
+            logger.error(f"DHT Lookup error: {e}")
+            owner_url = None
 
         owners = []
         if owner_url:

@@ -1,7 +1,5 @@
 #!/bin/bash
-
-echo "Stopping all P2P nodes..."
-pkill -f "src/main.py start-node"
-echo "Stopping Web UI..."
+echo "Stopping all python nodes..."
+pkill -f "src/main.py"
 pkill -f "src/web_ui.py"
-echo "All nodes stopped."
+echo "Stopped."
