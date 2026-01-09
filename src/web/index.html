@@ -56,8 +56,21 @@
           </div>
         </div>
         <div class="col-md-6">
+          <!-- Download by Manifest ID -->
+          <div class="card mb-3">
+             <div class="card-header bg-dark text-white">Download from Network</div>
+             <div class="card-body">
+                <div class="input-group">
+                   <input type="text" id="manifestIdInput" class="form-control" placeholder="Enter Manifest Hash ID (64 chars)" aria-label="Manifest Hash">
+                   <button class="btn btn-primary" type="button" onclick="downloadByManifestId()">Download</button>
+                </div>
+                <div class="form-text">Paste a Manifest ID to fetch the file directly from the network.</div>
+             </div>
+          </div>
+
+          <!-- Existing "Available Manifests" card -->
           <div class="card h-100">
-            <div class="card-header bg-info text-white">Available Manifests</div>
+            <div class="card-header bg-info text-white">Available Manifests (Local)</div>
             <div class="card-body">
               <ul id="manifestList" class="list-group">
                 <li class="list-group-item text-center">Loading...</li>
@@ -113,6 +126,24 @@
       }
 
       // --- Manifests ---
+      
+      function downloadByManifestId() {
+          const input = document.getElementById("manifestIdInput");
+          const id = input.value.trim();
+          
+          if (!id) {
+              alert("Please enter a Manifest ID.");
+              return;
+          }
+          if (id.length !== 64) {
+              alert("Invalid ID length. A valid Manifest Hash must be 64 characters.");
+              return;
+          }
+          
+          // Reuse existing download logic which now supports IDs
+          downloadFile(id);
+      }
+
       async function loadManifests() {
         try {
           const res = await fetch("/api/manifests");
@@ -571,7 +602,24 @@
                         }
                         if (statusText) {
                           statusText.className = "text-success fw-bold";
-                          statusText.innerText = "Distribution Completed Successfully!";
+                          // Use the backend message which contains the ID
+                          statusText.innerText = task.message;
+                        }
+
+                        // Try to extract Manifest ID for better visibility
+                        const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/);
+                        if (match && match[1]) {
+                             const manifestId = match[1];
+                             const alertHtml = `
+                                <div class="alert alert-success mt-2">
+                                    <strong>Build Success!</strong><br>
+                                    Manifest ID: <code class="user-select-all">${manifestId}</code><br>
+                                    <small class="text-muted">(Share this ID for direct download)</small>
+                                </div>
+                             `;
+                             statusDiv.innerHTML += alertHtml;
+                             // Don't auto-hide immediately if we show important info
+                             return;
                         }
 
                         loadManifests();

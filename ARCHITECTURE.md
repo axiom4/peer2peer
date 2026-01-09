@@ -176,6 +176,7 @@ The system relies on a dual-protocol stack: UDP for low-latency control and disc
 Broadcasted every 1s by every active node.
 
 - **Payload**:
+
   ```json
   {
     "type": "HELLO",
@@ -312,10 +313,10 @@ stateDiagram-v2
 
 When a node starts (`P2PServer` initialization):
 
-1.  **Storage Check**: Ensures the `storage_dir` exists.
-2.  **Service Binding**: Binds HTTP port for data transfer and UDP port (random or fixed) for discovery.
-3.  **Presence Announcement**: Immediately starts broadcasting `HELLO` beacons via UDP to port 9999.
-4.  **Integration**: Other nodes receive the beacon and add the new node to their in-memory peer lists. No central registration is required.
+1. **Storage Check**: Ensures the `storage_dir` exists.
+2. **Service Binding**: Binds HTTP port for data transfer and UDP port (random or fixed) for discovery.
+3. **Presence Announcement**: Immediately starts broadcasting `HELLO` beacons via UDP to port 9999.
+4. **Integration**: Other nodes receive the beacon and add the new node to their in-memory peer lists. No central registration is required.
 
 ### B. Active State (Liveness)
 
