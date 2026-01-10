@@ -335,31 +335,35 @@ class CatalogClient:
         dht_key = "catalog_" + key[:56]
 
         print(
-            f"Removing from Catalog {dht_key} and Purging Key {manifest_id[:8]}...")
+            f"Removing from Catalog {dht_key} and Purging Key {manifest_id[:8]}...", flush=True)
 
         client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
         client_info = {"sender_id": client_id_hex,
                        "host": "127.0.0.1", "port": 0}
 
+        nonce = str(time.time())
+
         # Payload 1: Remove from Catalog List
         payload_list = {
             "key": dht_key,
             "value": manifest_id,
-            "sender": client_info
+            "sender": client_info,
+            "nonce": nonce # Allow retries
         }
-
+        
         # Payload 2: Remove ID key (if stored as KV)
         payload_kv = {
             "key": manifest_id,
             "value": "",
-            "sender": client_info
+            "sender": client_info,
+            "nonce": nonce
         }
 
         success_count = 0
         import aiohttp
         async with aiohttp.ClientSession() as session:
             targets = distributor_nodes
-            print(f"Catalog Delete: Broadcasting to {len(targets)} nodes...")
+            print(f"Catalog Delete: Broadcasting to {len(targets)} nodes...", flush=True)
 
             tasks = []
             for node in targets:
@@ -370,9 +374,20 @@ class CatalogClient:
 
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for res in results:
-                    if not isinstance(res, Exception) and res.status == 200:
-                        success_count += 0.5
+                for i, res in enumerate(results):
+                    url = targets[i // 2 if i < len(targets) * 2 else 0].url if i < len(targets) * 2 else "unknown"
+                    if isinstance(res, Exception):
+                        print(f"❌ Delete failed for {url}: {res}")
+                    elif res.status == 200:
+                        try:
+                            resp_json = await res.json()
+                            print(f"✅ Node {url} responded: {resp_json}")
+                            success_count += 0.5
+                        except:
+                             print(f"✅ Node {url} responded (non-json 200)")
+                             success_count += 0.5
+                    else:
+                        print(f"⚠️ Node {url} returned status {res.status}")
 
         if success_count > 0:
             print(f"✅ Removed from Catalog/DHT on {int(success_count)} nodes.")

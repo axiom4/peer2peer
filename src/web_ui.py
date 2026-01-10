@@ -615,7 +615,7 @@ async def delete_manifest(request):
                     for peer in broadcast_targets:
                         # Use the new batch endpoint
                         tasks.append(session.post(
-                            f"{peer}/chunks/delete_batch", json=payload, timeout=3))
+                            f"{peer}/chunks/delete_batch", json=payload, timeout=5))
 
             # 2. DELETE MANIFEST CHUNK (Single ID)
             # Manifest itself is also a chunk (the file content), so we delete it specifically
@@ -627,7 +627,7 @@ async def delete_manifest(request):
                 payload_manifest = {"chunk_ids": [manifest_id_to_delete]}
                 for peer in broadcast_targets:
                     tasks.append(session.post(
-                        f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=3))
+                        f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=5))
 
             if tasks:
                 print(
@@ -640,17 +640,22 @@ async def delete_manifest(request):
         try:
             # Re-use broadcast_targets calculated above
             print(
-                f"Delete: Broadcasting CATALOG REMOVAL to {len(broadcast_targets)} nodes...")
+                f"Delete: Broadcasting CATALOG REMOVAL to {len(broadcast_targets)} nodes...", flush=True)
 
             if broadcast_targets:
-                from src.network.remote_node import RemoteHttpNode
+                from network.remote_node import RemoteHttpNode
+                try:
+                    from main import CatalogClient
+                except ImportError:
+                    from src.main import CatalogClient
+
                 # Quick wrapper
                 dht_nodes = [RemoteHttpNode(url) for url in broadcast_targets]
 
                 cat = CatalogClient()
                 await cat.delete(target_id, dht_nodes)
         except Exception as e:
-            print(f"Delete: Failed to remove from DHT Catalog: {e}")
+            print(f"Delete: Failed to remove from DHT Catalog: {e}", flush=True)
 
     return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested deletion of {len(chunks_to_delete)} chunks."})
 

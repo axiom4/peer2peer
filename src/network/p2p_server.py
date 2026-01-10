@@ -24,9 +24,9 @@ class P2PServer:
         self.peers = set()
         self.max_peers = 25  # Increased for DHT connectivity
         self.seen_requests = collections.deque(
-            maxlen=1000)  # Loop prevention for DHT
+            maxlen=50000)  # Loop prevention for DHT
         # Loop prevention for Chunk Deletion
-        self.seen_reclaims = collections.deque(maxlen=1000)
+        self.seen_reclaims = collections.deque(maxlen=50000)
 
         # Initialize DHT
         self.dht = DHT(host, port, storage_dir)
@@ -108,12 +108,13 @@ class P2PServer:
 
             print(
                 f"DHT DELETE REQUEST received for key={key[:8]}... val={val[:20]}...")
-
+            
             # GOSSIP PROPAGATION
-            # Create a unique ID for this delete request to dedup
+            # Create a unique ID for this delete request to dedup, include nonce if present
+            nonce = data.get('nonce', '')
             import hashlib
-            msg_id = hashlib.sha256(f"{key}{val}".encode()).hexdigest()
-
+            msg_id = hashlib.sha256(f"{key}{val}{nonce}".encode()).hexdigest()
+            
             if msg_id in self.seen_requests:
                 # Already processed, stop propagation
                 # print(f"  -> Skipping duplicate delete request {msg_id[:8]}")
