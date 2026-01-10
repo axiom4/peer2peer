@@ -884,11 +884,12 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
             url = f"{gateway.url}/dht/find_value"
             payload = {"key": node_id, "sender": {
                 "sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}}
-            
+
             # Wrap in a task
-            task = asyncio.create_task(session.post(url, json=payload, timeout=2))
+            task = asyncio.create_task(
+                session.post(url, json=payload, timeout=2))
             tasks.append(task)
-        
+
         # Wait for first success
         pending = tasks
         while pending:
@@ -903,7 +904,7 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
                             # Cancel pending
                             for p in pending:
                                 p.cancel()
-                                
+
                             if isinstance(val, str):
                                 NODE_CACHE[node_id] = val
                                 return val
@@ -912,7 +913,7 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
                             return json_val
                 except Exception:
                     pass
-                    
+
     return None
 
 
@@ -1286,22 +1287,22 @@ async def _recursive_collect_manifests(node_id):
             return []
 
         entries = node_data.get("entries", {})
-        
+
         # Parallel collection tasks
         dir_tasks = []
-        
+
         for item_name, info in entries.items():
             if info["type"] == "file":
                 manifests.append((info["id"], item_name))
             elif info["type"] == "directory":
                 dir_tasks.append(_recursive_collect_manifests(info["id"]))
-        
+
         if dir_tasks:
             results = await asyncio.gather(*dir_tasks, return_exceptions=True)
             for res in results:
                 if isinstance(res, list):
                     manifests.extend(res)
-                    
+
     except Exception as e:
         print(f"Error recursively collecting manifests for {node_id}: {e}")
 
