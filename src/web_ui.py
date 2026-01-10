@@ -1153,6 +1153,43 @@ async def _delete_file_from_network(manifest_id, name_hint=None):
             print(f"Delete: Failed to remove from DHT Catalog: {e}")
 
 
+
+async def _recursive_collect_manifests(node_id):
+    """
+    Recursively collects all file manifest IDs from a directory structure.
+    Used to clean up all files when a directory is deleted.
+    """
+    manifests = []
+    try:
+        content = await fs_fetch_node_fn(node_id)
+        if not content:
+            return []
+        
+        # Ensure we handle bytes/str from the fetch
+        if isinstance(content, bytes):
+            content = content.decode('utf-8')
+            
+        try:
+            node_data = json.loads(content)
+        except:
+            return []
+        
+        if node_data.get("type") != "directory":
+            return []
+
+        entries = node_data.get("entries", {})
+        for _, info in entries.items():
+            if info["type"] == "file":
+                manifests.append(info["id"])
+            elif info["type"] == "directory":
+                sub_manifests = await _recursive_collect_manifests(info["id"])
+                manifests.extend(sub_manifests)
+    except Exception as e:
+        print(f"Error recursively collecting manifests for {node_id}: {e}")
+    
+    return manifests
+
+
 async def handle_fs_delete(request):
     """
     POST /api/fs/delete
@@ -1171,8 +1208,10 @@ async def handle_fs_delete(request):
 
     root_id = await fs_get_root_id()
 
-    # Pre-check: Resolve path to get ID before deleting, so we can delete content if it's a file
-    manifest_to_delete = None
+    # Pre-check: Resolve parent to identify what we are deleting (file or dir)
+    # If it's a directory, we need to recursively find all files inside it to delete chunks.
+    manifests_to_delete = []
+
     try:
         # Resolve parent directory
         parent_id = await FS_MANAGER.resolve_path(root_id, base_path, fs_fetch_node_fn)
@@ -1182,8 +1221,15 @@ async def handle_fs_delete(request):
                 parent_node = FS_MANAGER.load_directory(parent_json)
                 if name in parent_node.entries:
                     entry = parent_node.entries[name]
+                    
                     if entry["type"] == "file":
-                        manifest_to_delete = entry["id"]
+                        manifests_to_delete.append(entry["id"])
+                    elif entry["type"] == "directory":
+                        print(f"Delete: Recursive cleanup target detected: {name}")
+                        collected = await _recursive_collect_manifests(entry["id"])
+                        manifests_to_delete.extend(collected)
+                        print(f"Delete: Found {len(collected)} nested files to remove contents for.")
+
     except Exception as e:
         print(f"Delete Pre-check Error: {e}")
 
@@ -1198,15 +1244,18 @@ async def handle_fs_delete(request):
 
         await fs_set_root_id(new_root_id)
 
-        # Trigger network deletion if applicable
-        if manifest_to_delete:
-            asyncio.create_task(_delete_file_from_network(
-                manifest_to_delete, name_hint=name))
+        # Trigger network deletion for all identified file manifests
+        if manifests_to_delete:
+            print(f"Delete: Triggering network cleanup for {len(manifests_to_delete)} files.")
+            for mid in manifests_to_delete:
+                # Fire and forget deletion for each file
+                asyncio.create_task(_delete_file_from_network(mid, name_hint=name if len(manifests_to_delete)==1 else None))
 
         return web.json_response({"status": "ok"})
     except Exception as e:
         print(f"Error deleting FS entry: {e}")
         return web.json_response({"error": str(e)}, status=500)
+
 
 
 def start_web_server(port=8888):
