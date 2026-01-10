@@ -86,35 +86,37 @@
       <div class="col-12 mb-4">
         <div class="card">
           <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-             <span>📂 Decentralized Filesystem</span>
-             <div>
-                <i id="fsLoading" class="fas fa-sync fa-spin text-white me-2" style="display:none"></i>
-                <button class="btn btn-sm btn-light me-2" onclick="promptMkdir()"><i class="fas fa-folder-plus"></i> New Folder</button>
-                <button class="btn btn-sm btn-light" onclick="triggerFsUpload()"><i class="fas fa-upload"></i> Upload Here</button>
-             </div>
+            <span>📂 Decentralized Filesystem</span>
+            <div>
+              <i id="fsLoading" class="fas fa-sync fa-spin text-white me-2" style="display: none"></i>
+              <button class="btn btn-sm btn-light me-2" onclick="promptMkdir()"><i class="fas fa-folder-plus"></i> New Folder</button>
+              <button class="btn btn-sm btn-light" onclick="triggerFsUpload()"><i class="fas fa-upload"></i> Upload Here</button>
+            </div>
           </div>
           <div class="card-body bg-white">
-             <nav aria-label="breadcrumb">
-               <ol class="breadcrumb bg-light p-2 rounded" id="fsBreadcrumbs">
-                 <li class="breadcrumb-item active" aria-current="page">/</li>
-               </ol>
-             </nav>
-             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                   <thead class="table-light">
-                      <tr>
-                         <th style="width: 40px"></th>
-                         <th>Name</th>
-                         <th style="width: 100px">Type</th>
-                         <th style="width: 100px">Size</th>
-                         <th style="width: 150px">Actions</th>
-                      </tr>
-                   </thead>
-                   <tbody id="fsFileList">
-                     <tr><td colspan="5" class="text-center text-muted">Loading filesystem...</td></tr>
-                   </tbody>
-                </table>
-             </div>
+            <nav aria-label="breadcrumb">
+              <ol class="breadcrumb bg-light p-2 rounded" id="fsBreadcrumbs">
+                <li class="breadcrumb-item active" aria-current="page">/</li>
+              </ol>
+            </nav>
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width: 40px"></th>
+                    <th>Name</th>
+                    <th style="width: 100px">Type</th>
+                    <th style="width: 100px">Size</th>
+                    <th style="width: 150px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="fsFileList">
+                  <tr>
+                    <td colspan="5" class="text-center text-muted">Loading filesystem...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -644,7 +646,7 @@
           const file = input.files[0];
           const replicas = document.getElementById("replicasInput").value || 5;
           const compression = document.getElementById("compressionCheck").checked;
-          
+
           // Capture current path at moment of upload start
           const targetFsPath = currentFsPath;
 
@@ -741,7 +743,7 @@
                                 </div>
                              `;
                           statusDiv.innerHTML += alertHtml;
-                          
+
                           // Always add to filesystem at the captured path
                           addFileToFs(manifestId, file.name, file.size, targetFsPath);
                         }
@@ -905,218 +907,221 @@
       }
 
       // Init
-      document.addEventListener("DOMContentLoaded", function() {
-          console.log("Initializing Dashboard...");
-          loadManifests();
-          loadGraph();
-          console.log("Calling loadFilesystem...");
-          loadFilesystem("/")
-            .then(() => console.log("Filesystem loaded"))
-            .catch(e => console.error("FS Load Error:", e));
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("Initializing Dashboard...");
+        loadManifests();
+        loadGraph();
+        console.log("Calling loadFilesystem...");
+        loadFilesystem("/")
+          .then(() => console.log("Filesystem loaded"))
+          .catch((e) => console.error("FS Load Error:", e));
       });
       // Refresh manifest list every 10 sec
       setInterval(loadManifests, 10000);
 
       // --- Filesystem Logic ---
-      
+
       let currentFsPath = "/";
       window.isFsUpload = false;
-      
+
       async function loadFilesystem(path = "/") {
         currentFsPath = path;
         renderBreadcrumbs(path);
-        
+
         const tbody = document.getElementById("fsFileList");
-        if(document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "inline-block";
-        
+        if (document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "inline-block";
+
         try {
-           const res = await fetch(`/api/fs/ls?path=${encodeURIComponent(path)}`);
-           const data = await res.json();
-           
-           tbody.innerHTML = "";
-           
-           if(data.path !== "/") {
-               const parentPath = currentFsPath.substring(0, currentFsPath.lastIndexOf('/')) || "/";
-               const tr = document.createElement("tr");
-               tr.innerHTML = `
+          const res = await fetch(`/api/fs/ls?path=${encodeURIComponent(path)}`);
+          const data = await res.json();
+
+          tbody.innerHTML = "";
+
+          if (data.path !== "/") {
+            const parentPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
                  <td><i class="fas fa-folder-open text-warning fa-lg"></i></td>
                  <td><a href="#" onclick="loadFilesystem('${parentPath}'); return false;" class="text-decoration-none text-dark fw-bold">..</a></td>
                  <td>Dir</td>
                  <td>-</td>
                  <td></td>
                `;
-               tbody.appendChild(tr);
-           }
-           
-           if(data.entries && data.entries.length > 0) {
-               data.entries.sort((a,b) => {
-                   if(a.type === b.type) return a.name.localeCompare(b.name);
-                   return a.type === "directory" ? -1 : 1;
-               });
-               
-               data.entries.forEach(entry => {
-                   const tr = document.createElement("tr");
-                   const icon = entry.type === 'directory' ? 'fa-folder text-warning' : 'fa-file-alt text-secondary';
-                   
-                   let nameLink = entry.name;
-                   if(entry.type === 'directory') {
-                       const nextPath = path === "/" ? `/${entry.name}` : `${path}/${entry.name}`;
-                       nameLink = `<a href="#" onclick="loadFilesystem('${nextPath}'); return false;" class="fw-bold text-decoration-none text-dark">${entry.name}</a>`;
-                   }
-                   
-                   tr.innerHTML = `
+            tbody.appendChild(tr);
+          }
+
+          if (data.entries && data.entries.length > 0) {
+            data.entries.sort((a, b) => {
+              if (a.type === b.type) return a.name.localeCompare(b.name);
+              return a.type === "directory" ? -1 : 1;
+            });
+
+            data.entries.forEach((entry) => {
+              const tr = document.createElement("tr");
+              const icon = entry.type === "directory" ? "fa-folder text-warning" : "fa-file-alt text-secondary";
+
+              let nameLink = entry.name;
+              if (entry.type === "directory") {
+                const nextPath = path === "/" ? `/${entry.name}` : `${path}/${entry.name}`;
+                nameLink = `<a href="#" onclick="loadFilesystem('${nextPath}'); return false;" class="fw-bold text-decoration-none text-dark">${entry.name}</a>`;
+              }
+
+              tr.innerHTML = `
                      <td><i class="fas ${icon} fa-lg"></i></td>
                      <td>${nameLink}</td>
                      <td>${entry.type}</td>
-                     <td>${entry.type === 'file' ? formatBytes(entry.size) : '-'}</td>
+                     <td>${entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
                      <td>
                         <div class="btn-group">
-                        ${entry.type === 'file' ? 
-                          `<button class="btn btn-sm btn-outline-primary" onclick="window.location.href='/api/stream_id/${entry.id}'"><i class="fas fa-download"></i></button>` : 
-                          ''}
-                        ${entry.type === 'file' ?
-                          `<button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${entry.id}', true)"><i class="fas fa-project-diagram"></i></button>` :
-                          ''}
+                        ${
+                          entry.type === "file"
+                            ? `<button class="btn btn-sm btn-outline-primary" onclick="window.location.href='/api/stream_id/${entry.id}'"><i class="fas fa-download"></i></button>`
+                            : ""
+                        }
+                        ${
+                          entry.type === "file"
+                            ? `<button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${entry.id}', true)"><i class="fas fa-project-diagram"></i></button>`
+                            : ""
+                        }
                         <button class="btn btn-sm btn-outline-danger" onclick="deleteFsEntry('${entry.name}')"><i class="fas fa-trash"></i></button>
                         </div>
                      </td>
                    `;
-                   tbody.appendChild(tr);
-               });
-           } else {
-               if(tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Empty directory</td></tr>';
-           }
-           
-        } catch(e) {
-            console.error(e);
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${e}</td></tr>`;
+              tbody.appendChild(tr);
+            });
+          } else {
+            if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Empty directory</td></tr>';
+          }
+        } catch (e) {
+          console.error(e);
+          tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${e}</td></tr>`;
         } finally {
-            if(document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "none";
+          if (document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "none";
         }
       }
 
       function renderBreadcrumbs(path) {
-          const nav = document.getElementById("fsBreadcrumbs");
-          nav.innerHTML = "";
-          
-          const parts = path.split("/").filter(p => p);
-          
-          const rootLi = document.createElement("li");
-          rootLi.className = "breadcrumb-item";
-          if(parts.length === 0) {
-              rootLi.classList.add("active");
-              rootLi.innerText = "Root";
+        const nav = document.getElementById("fsBreadcrumbs");
+        nav.innerHTML = "";
+
+        const parts = path.split("/").filter((p) => p);
+
+        const rootLi = document.createElement("li");
+        rootLi.className = "breadcrumb-item";
+        if (parts.length === 0) {
+          rootLi.classList.add("active");
+          rootLi.innerText = "Root";
+        } else {
+          rootLi.innerHTML = `<a href="#" onclick="loadFilesystem('/'); return false;">Root</a>`;
+        }
+        nav.appendChild(rootLi);
+
+        let accum = "";
+        parts.forEach((part, idx) => {
+          accum += "/" + part;
+          accum = accum.replace("//", "/");
+
+          const li = document.createElement("li");
+          li.className = "breadcrumb-item";
+          if (idx === parts.length - 1) {
+            li.classList.add("active");
+            li.innerText = part;
           } else {
-              rootLi.innerHTML = `<a href="#" onclick="loadFilesystem('/'); return false;">Root</a>`;
+            li.innerHTML = `<a href="#" onclick="loadFilesystem('${accum}'); return false;">${part}</a>`;
           }
-          nav.appendChild(rootLi);
-          
-          let accum = "";
-          parts.forEach((part, idx) => {
-              accum += "/" + part;
-              accum = accum.replace("//", "/");
-              
-              const li = document.createElement("li");
-              li.className = "breadcrumb-item";
-              if(idx === parts.length - 1) {
-                  li.classList.add("active");
-                  li.innerText = part;
-              } else {
-                  li.innerHTML = `<a href="#" onclick="loadFilesystem('${accum}'); return false;">${part}</a>`;
-              }
-              nav.appendChild(li);
-          });
+          nav.appendChild(li);
+        });
       }
-      
+
       async function deleteFsEntry(name) {
-          if(!confirm(`Are you sure you want to delete '${name}'?`)) return;
-          
-          try {
-              const res = await fetch("/api/fs/delete", {
-                  method: "POST",
-                  headers: {"Content-Type": "application/json"},
-                  body: JSON.stringify({
-                      path: currentFsPath,
-                      name: name
-                  })
-              });
-              const result = await res.json();
-              if(res.ok) {
-                  loadFilesystem(currentFsPath);
-              } else {
-                  alert("Error: " + (result.error || result.message));
-              }
-          } catch(e) {
-              alert("Error: " + e);
+        if (!confirm(`Are you sure you want to delete '${name}'?`)) return;
+
+        try {
+          const res = await fetch("/api/fs/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: currentFsPath,
+              name: name,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            loadFilesystem(currentFsPath);
+          } else {
+            alert("Error: " + (result.error || result.message));
           }
+        } catch (e) {
+          alert("Error: " + e);
+        }
       }
 
       async function promptMkdir() {
-          const name = prompt("Enter folder name:");
-          if(!name) return;
-          
-          try {
-              const res = await fetch("/api/fs/mkdir", {
-                  method: "POST",
-                  headers: {"Content-Type": "application/json"},
-                  body: JSON.stringify({
-                      path: currentFsPath,
-                      name: name
-                  })
-              });
-              const result = await res.json();
-              if(res.ok) {
-                  loadFilesystem(currentFsPath);
-              } else {
-                  alert("Error: " + result.error);
-              }
-          } catch(e) {
-              alert("Error: " + e);
+        const name = prompt("Enter folder name:");
+        if (!name) return;
+
+        try {
+          const res = await fetch("/api/fs/mkdir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: currentFsPath,
+              name: name,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            loadFilesystem(currentFsPath);
+          } else {
+            alert("Error: " + result.error);
           }
+        } catch (e) {
+          alert("Error: " + e);
+        }
       }
 
       function triggerFsUpload() {
-          const input = document.getElementById("fileInput");
-          input.click();
-          // Remove flag dependency, always upload to current FS path
-          // window.isFsUpload = true; 
-          document.getElementById("uploadForm").scrollIntoView({behavior: "smooth"});
+        const input = document.getElementById("fileInput");
+        input.click();
+        // Remove flag dependency, always upload to current FS path
+        // window.isFsUpload = true;
+        document.getElementById("uploadForm").scrollIntoView({ behavior: "smooth" });
       }
 
       async function addFileToFs(manifestId, filename, size, targetPath = null) {
-          const path = targetPath || currentFsPath;
-          try {
-              const res = await fetch("/api/fs/add_file", {
-                  method: "POST",
-                  headers: {"Content-Type": "application/json"},
-                  body: JSON.stringify({
-                      path: path,
-                      name: filename,
-                      id: manifestId,
-                      size: size
-                  })
-              });
-              const result = await res.json();
-              if(res.ok) {
-                  // Only refresh if we are currently viewing the target directory
-                  if (path === currentFsPath) {
-                      loadFilesystem(currentFsPath);
-                  }
-                  
-                  // Scroll back?
-                  const fsCard = document.getElementById("fsFileList").closest(".card");
-                  // Only scroll if we used the trigger button? 
-                  // Let's scroll anyway to show the result
-                  // if(fsCard) fsCard.scrollIntoView({behavior: "smooth"});
-              } else {
-                  console.warn("Error adding to filesystem: " + result.error);
-                  // Don't alert blocking errors for background addition if user didn't explicit ask?
-                  // But standard behavior is likely "I want it in my drive".
-                  // alert("Error adding to filesystem: " + result.error);
-              }
-          } catch(e) {
-              console.error(e);
+        const path = targetPath || currentFsPath;
+        try {
+          const res = await fetch("/api/fs/add_file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: path,
+              name: filename,
+              id: manifestId,
+              size: size,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            // Only refresh if we are currently viewing the target directory
+            if (path === currentFsPath) {
+              loadFilesystem(currentFsPath);
+            }
+
+            // Scroll back?
+            const fsCard = document.getElementById("fsFileList").closest(".card");
+            // Only scroll if we used the trigger button?
+            // Let's scroll anyway to show the result
+            // if(fsCard) fsCard.scrollIntoView({behavior: "smooth"});
+          } else {
+            console.warn("Error adding to filesystem: " + result.error);
+            // Don't alert blocking errors for background addition if user didn't explicit ask?
+            // But standard behavior is likely "I want it in my drive".
+            // alert("Error adding to filesystem: " + result.error);
           }
+        } catch (e) {
+          console.error(e);
+        }
       }
     </script>
   </body>
