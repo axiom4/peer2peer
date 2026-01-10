@@ -15,6 +15,7 @@ try:
     from src.core.metadata import MetadataManager
     from src.network.remote_node import RemoteHttpNode
     from src.core.distribution import DistributionStrategy
+    from src.core.filesystem import FilesystemManager, DirectoryNode
 except ImportError:
     try:
         # If running from src directory
@@ -24,6 +25,7 @@ except ImportError:
         from core.metadata import MetadataManager
         from network.remote_node import RemoteHttpNode
         from core.distribution import DistributionStrategy
+        from core.filesystem import FilesystemManager, DirectoryNode
     except ImportError as e:
         print(f"Import Error: {e}")
         # Last resort for direct execution
@@ -35,12 +37,18 @@ except ImportError:
         from src.core.repair import RepairManager
         from src.core.metadata import MetadataManager
         from src.network.remote_node import RemoteHttpNode
+        from src.core.filesystem import FilesystemManager, DirectoryNode
 
 
 import uuid
+import hashlib
+from typing import Optional
 
 # Global task tracker
 TASKS = {}
+FS_MANAGER = FilesystemManager()
+FS_ROOT_KEY = "filesystem_root_v1"
+WEB_UI_NODE_ID = hashlib.sha256(b"web_ui_client").hexdigest()
 
 
 async def handle_index(request):
@@ -591,74 +599,9 @@ async def delete_manifest(request):
             return web.json_response({"error": f"Invalid manifest or file error: {e}"}, status=500)
 
     # 3. Execute Distributed Delete
-    # Use discovered peers for propagation (Gossip Protocol)
-    # The network will propagate the deletion request.
-    broadcast_targets = list(final_peers) if final_peers else []
+    await _delete_file_from_network(manifest_id_to_delete)
 
-    # Fallback to seed nodes if discovery failed, to kickstart gossip
-    if not broadcast_targets:
-        broadcast_targets = [
-            f"http://127.0.0.1:{p}" for p in range(8000, 8003)]
-
-    if broadcast_targets and (chunks_to_delete or manifest_id_to_delete):
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-
-            # 1. DELETE CONTENT CHUNKS (BATCH OPTIMIZED)
-            if chunks_to_delete:
-                # Split huge lists into smaller batches (e.g. 500) to avoid payload limits
-                batch_size = 500
-                for i in range(0, len(chunks_to_delete), batch_size):
-                    batch = chunks_to_delete[i:i + batch_size]
-                    payload = {"chunk_ids": batch}
-
-                    for peer in broadcast_targets:
-                        # Use the new batch endpoint
-                        tasks.append(session.post(
-                            f"{peer}/chunks/delete_batch", json=payload, timeout=5))
-
-            # 2. DELETE MANIFEST CHUNK (Single ID)
-            # Manifest itself is also a chunk (the file content), so we delete it specifically
-            if manifest_id_to_delete:
-                # We can also add it to a batch, but let's keep it separate or just add to the list?
-                # Actually, if we use batch delete, we can treat manifest_id as just another chunk.
-                # But let's keep explicit call for clarity or add to a mixed batch.
-                # Simpler: just fire a single batch for it too.
-                payload_manifest = {"chunk_ids": [manifest_id_to_delete]}
-                for peer in broadcast_targets:
-                    tasks.append(session.post(
-                        f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=5))
-
-            if tasks:
-                print(
-                    f"Delete: Starting BATCH propagation via {len(broadcast_targets)} entry nodes...")
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-    # 4. Remove from DHT Public Catalog
-    if is_id or manifest_id_to_delete:
-        target_id = manifest_id_to_delete if manifest_id_to_delete else name
-        try:
-            # Re-use broadcast_targets calculated above
-            print(
-                f"Delete: Broadcasting CATALOG REMOVAL to {len(broadcast_targets)} nodes...", flush=True)
-
-            if broadcast_targets:
-                from network.remote_node import RemoteHttpNode
-                try:
-                    from main import CatalogClient
-                except ImportError:
-                    from src.main import CatalogClient
-
-                # Quick wrapper
-                dht_nodes = [RemoteHttpNode(url) for url in broadcast_targets]
-
-                cat = CatalogClient()
-                await cat.delete(target_id, dht_nodes)
-        except Exception as e:
-            print(
-                f"Delete: Failed to remove from DHT Catalog: {e}", flush=True)
-
-    return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested deletion of {len(chunks_to_delete)} chunks."})
+    return web.json_response({"status": "ok", "message": f"Deleted manifest {name}"})
 
 
 async def stream_download(request):
@@ -753,6 +696,10 @@ async def stream_download_by_id(request):
 
         shard_mgr, chunks_data, compression_mode, manifest_obj = result
 
+        # Get filename directly from in-memory manifest object
+        original_filename = manifest_obj.get(
+            'filename', f"downloaded_{manifest_id}.bin")
+
     except RuntimeError as e:
         # Handle "Chunk not found" specifically
         error_msg = str(e)
@@ -761,13 +708,6 @@ async def stream_download_by_id(request):
         return web.Response(status=500, text=f"Internal Error: {error_msg}")
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {e}")
-
-        # Get filename directly from in-memory manifest object
-        original_filename = manifest_obj.get(
-            'filename', f"downloaded_{manifest_id}.bin")
-
-    except Exception as e:
-        return web.Response(status=500, text=f"Internal Error: {str(e)}")
 
     headers = {
         "Content-Disposition": f'attachment; filename="{original_filename}"',
@@ -859,6 +799,400 @@ async def get_manifest_by_id(request):
     return web.json_response(data)
 
 
+
+# --- Filesystem Helpers ---
+
+async def get_dht_nodes(count=5):
+    """Returns a deterministic list of RemoteHttpNodes for metadata consistency."""
+    # We prioritize a stable set of core nodes (8000+) to ensure Read-Your-Writes consistency for metadata.
+    # In a real DHT, we would hash the key to find the node, but here we just replicate to the first N nodes.
+    stable_peers = [f"http://127.0.0.1:{8000+i}" for i in range(20)]
+    return [RemoteHttpNode(u) for u in stable_peers[:count]]
+
+async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
+    # Query stable nodes
+    gateways = await get_dht_nodes(10)
+    
+    async with aiohttp.ClientSession() as session:
+        for gateway in gateways:
+            try:
+                url = f"{gateway.url}/dht/find_value"
+                payload = {"key": node_id, "sender": {"sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}}
+                async with session.post(url, json=payload, timeout=2) as resp:
+                    data = await resp.json()
+                    if "value" in data:
+                        val = data["value"]
+                        if isinstance(val, str): return val
+                        return json.dumps(val)
+            except Exception:
+                continue
+    return None
+
+async def fs_store_node_fn(node: DirectoryNode) -> str:
+    # Replicate to multiple nodes
+    gateways = await get_dht_nodes(5)
+    node_hash = node.get_hash()
+    
+    success_count = 0
+    async with aiohttp.ClientSession() as session:
+        async def _pusher(gw):
+            nonlocal success_count
+            try:
+                 url = f"{gw.url}/dht/store"
+                 payload = {
+                     "key": node_hash,
+                     "value": node.to_json(),
+                     "sender": {"sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}
+                 }
+                 async with session.post(url, json=payload, timeout=2) as resp:
+                     if resp.status == 200:
+                         success_count += 1
+            except:
+                pass
+
+        await asyncio.gather(*[_pusher(g) for g in gateways])
+    
+    if success_count == 0:
+        raise RuntimeError(f"Failed to store directory node {node_hash} on any gateway")
+        
+    return node_hash
+
+async def fs_get_root_id() -> Optional[str]:
+    # Try to find root key on any node
+    gateways = await get_dht_nodes(10)
+    async with aiohttp.ClientSession() as session:
+        for gateway in gateways:
+            try:
+                url = f"{gateway.url}/dht/find_value"
+                payload = {"key": FS_ROOT_KEY, "sender": {"sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}}
+                async with session.post(url, json=payload, timeout=2) as resp:
+                    data = await resp.json()
+                    if "value" in data:
+                        return data["value"]
+            except Exception:
+                pass
+    return None
+
+async def fs_set_root_id(new_root_id: str):
+     # Publish to MANY nodes to ensure availability
+     gateways = await get_dht_nodes(10)
+     
+     success_count = 0
+     async with aiohttp.ClientSession() as session:
+         async def _pusher(gw):
+             nonlocal success_count
+             try:
+                 url = f"{gw.url}/dht/store"
+                 payload = {
+                     "key": FS_ROOT_KEY,
+                     "value": new_root_id,
+                     "sender": {"sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}
+                 }
+                 async with session.post(url, json=payload, timeout=2) as resp:
+                     if resp.status == 200:
+                         success_count += 1
+             except Exception:
+                pass
+                
+         await asyncio.gather(*[_pusher(g) for g in gateways])
+         
+     if success_count == 0:
+         print(f"Warning: Failed to update FS Root ID {FS_ROOT_KEY} on any node.")
+
+# --- Filesystem Handlers ---
+
+async def handle_fs_ls(request):
+    """
+    GET /api/fs/ls?path=/foo/bar
+    """
+    path = request.query.get("path", "/")
+    
+    root_id = await fs_get_root_id()
+    if not root_id:
+        return web.json_response({
+            "path": path,
+            "entries": []
+        })
+
+    # Resolve ID of the directory at path
+    target_id = await FS_MANAGER.resolve_path(root_id, path, fs_fetch_node_fn)
+    
+    if not target_id:
+        return web.json_response({"error": "Path not found"}, status=404)
+        
+    # Fetch content
+    content_json = await fs_fetch_node_fn(target_id)
+    if not content_json:
+         return web.json_response({"error": "Object missing or unreachable"}, status=404)
+         
+    try:
+        node = FS_MANAGER.load_directory(content_json)
+        # Transform entries for UI
+        entries = []
+        for name, data in node.entries.items():
+            entries.append({
+                "name": name,
+                "type": data["type"],
+                "size": data.get("size", 0),
+                "id": data["id"],
+                "modified": data.get("modified")
+            })
+        
+        return web.json_response({
+            "path": path,
+            "entries": entries
+        })
+    except ValueError:
+        return web.json_response({"error": "Not a directory"}, status=400)
+
+async def handle_fs_mkdir(request):
+    """
+    POST /api/fs/mkdir 
+    { "path": "docs", "name": "work" } 
+    """
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    base_path = data.get("path", "/")
+    new_dir_name = data.get("name")
+    
+    if not new_dir_name:
+        return web.json_response({"error": "Name required"}, status=400)
+        
+    # Sanitize inputs
+    base_path = base_path.strip()
+    new_dir_name = new_dir_name.strip().replace("/", "")
+    
+    full_path = ""
+    if base_path == "/" or base_path == "":
+        full_path = new_dir_name
+    else:
+        full_path = f"{base_path}/{new_dir_name}".replace("//", "/")
+        
+    root_id = await fs_get_root_id()
+    
+    # Create empty directory
+    new_dir = DirectoryNode(new_dir_name)
+    new_dir_id = await fs_store_node_fn(new_dir)
+    
+    entry_data = {
+        "type": "directory",
+        "id": new_dir_id,
+        "size": 0
+    }
+    
+    try:
+        new_root_id = await FS_MANAGER.update_path(
+            root_id, 
+            base_path, 
+            new_dir_name, 
+            entry_data, 
+            fs_fetch_node_fn, 
+            fs_store_node_fn
+        )
+        
+        await fs_set_root_id(new_root_id)
+        return web.json_response({"status": "ok", "path": full_path})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def handle_fs_add_file(request):
+    """
+    POST /api/fs/add_file
+    { "path": "/docs", "name": "foo.txt", "id": "manifest_id...", "size": 1234 }
+    """
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    base_path = data.get("path", "/")
+    file_name = data.get("name")
+    file_id = data.get("id")
+    file_size = data.get("size", 0)
+
+    if not file_name or not file_id:
+        return web.json_response({"error": "Name and ID required"}, status=400)
+
+    root_id = await fs_get_root_id()
+
+    entry_data = {
+        "type": "file",
+        "id": file_id,
+        "size": file_size
+    }
+
+    try:
+        new_root_id = await FS_MANAGER.update_path(
+            root_id,
+            base_path,
+            file_name,
+            entry_data,
+            fs_fetch_node_fn,
+            fs_store_node_fn
+        )
+
+        await fs_set_root_id(new_root_id)
+        return web.json_response({"status": "ok", "path": f"{base_path}/{file_name}"})
+    except Exception as e:
+        print(f"Error adding file to FS: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def _delete_file_from_network(manifest_id, name_hint=None):
+    """
+    Helper function to delete manifest and chunks from the network.
+    Refactored from delete_manifest.
+    """
+    print(f"Delete: Starting network deletion for ID={manifest_id} Name={name_hint}")
+    
+    # 1. Discover Peers
+    peers = await scan_network()
+    # Unique list
+    final_peers = list(set(peers)) if peers else []
+    
+    chunks_to_delete = []
+
+    # 2. Fetch Manifest content to identify Chunks
+    # We must do this BEFORE deleting the manifest itself :)
+    distrib = DistributionStrategy([])
+    manifest_data = None
+    
+    # Try fetching via multiple peers manually since DistributionStrategy needs nodes list
+    if final_peers:
+        # Use simple HTTP fetch first to find the manifest storage
+        async with aiohttp.ClientSession() as session:
+            for peer in final_peers[:10]:
+                try:
+                    # Retrieve the manifest chunk directly
+                    async with session.get(f"{peer}/chunk/{manifest_id}", timeout=3) as r:
+                         if r.status == 200:
+                             manifest_data = await r.read()
+                             break
+                except: continue
+
+    if manifest_data:
+        try:
+            # It might be JSON string, bytes, or dict
+            if isinstance(manifest_data, (str, bytes)):
+                data = json.loads(manifest_data)
+            else:
+                data = manifest_data
+            chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
+            print(f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
+        except Exception as e:
+            print(f"Delete: Failed to parse manifest JSON: {e}")
+    else:
+        print("Delete: Warning - Manifest content not found on network. Only deleting ID.")
+
+    # 3. Execute Distributed Delete
+    broadcast_targets = list(final_peers) if final_peers else []
+    if not broadcast_targets:
+        broadcast_targets = [f"http://127.0.0.1:{p}" for p in range(8000, 8003)]
+
+    if broadcast_targets and (chunks_to_delete or manifest_id):
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            
+            # Delete content chunks
+            if chunks_to_delete:
+                batch_size = 500
+                for i in range(0, len(chunks_to_delete), batch_size):
+                    batch = chunks_to_delete[i:i + batch_size]
+                    payload = {"chunk_ids": batch}
+                    for peer in broadcast_targets:
+                        tasks.append(session.post(
+                            f"{peer}/chunks/delete_batch", json=payload, timeout=5))
+
+            # Delete manifest ID itself
+            if manifest_id:
+                payload_manifest = {"chunk_ids": [manifest_id]}
+                for peer in broadcast_targets:
+                    tasks.append(session.post(
+                        f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=5))
+
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 4. Remove from DHT Public Catalog
+    if manifest_id:
+        try:
+            from network.remote_node import RemoteHttpNode
+            try:
+                from main import CatalogClient
+            except ImportError:
+                from src.main import CatalogClient
+
+            dht_nodes = [RemoteHttpNode(url) for url in broadcast_targets]
+            cat = CatalogClient()
+            await cat.delete(manifest_id, dht_nodes)
+            # Also try deleting by name if provided, just in case
+            if name_hint:
+                 await cat.delete(name_hint, dht_nodes)
+                 
+        except Exception as e:
+            print(f"Delete: Failed to remove from DHT Catalog: {e}")
+
+
+async def handle_fs_delete(request):
+    """
+    POST /api/fs/delete
+    { "path": "/docs", "name": "foo.txt" }
+    """
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    base_path = data.get("path", "/")
+    name = data.get("name")
+
+    if not name:
+        return web.json_response({"error": "Name required"}, status=400)
+
+    root_id = await fs_get_root_id()
+
+    # Pre-check: Resolve path to get ID before deleting, so we can delete content if it's a file
+    manifest_to_delete = None
+    try:
+        # Resolve parent directory
+        parent_id = await FS_MANAGER.resolve_path(root_id, base_path, fs_fetch_node_fn)
+        if parent_id:
+            parent_json = await fs_fetch_node_fn(parent_id)
+            if parent_json:
+                parent_node = FS_MANAGER.load_directory(parent_json)
+                if name in parent_node.entries:
+                    entry = parent_node.entries[name]
+                    if entry["type"] == "file":
+                        manifest_to_delete = entry["id"]
+    except Exception as e:
+        print(f"Delete Pre-check Error: {e}")
+
+    try:
+        new_root_id = await FS_MANAGER.delete_path(
+            root_id,
+            base_path,
+            name,
+            fs_fetch_node_fn,
+            fs_store_node_fn
+        )
+
+        await fs_set_root_id(new_root_id)
+        
+        # Trigger network deletion if applicable
+        if manifest_to_delete:
+            asyncio.create_task(_delete_file_from_network(manifest_to_delete, name_hint=name))
+            
+        return web.json_response({"status": "ok"})
+    except Exception as e:
+        print(f"Error deleting FS entry: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
     os.makedirs('downloads', exist_ok=True)
@@ -909,6 +1243,10 @@ def start_web_server(port=8888):
         web.post('/api/repair', repair_file),
         web.post('/api/prune', clean_orphans),
         web.get('/api/network', get_network_graph),
+        web.get('/api/fs/ls', handle_fs_ls),
+        web.post('/api/fs/mkdir', handle_fs_mkdir),
+        web.post('/api/fs/add_file', handle_fs_add_file),
+        web.post('/api/fs/delete', handle_fs_delete),
         web.static('/downloads', 'downloads'),
     ])
     print(f"Web UI available at http://localhost:{port}")

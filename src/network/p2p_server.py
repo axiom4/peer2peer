@@ -57,6 +57,7 @@ class P2PServer:
             web.post('/unjoin', self.handle_unjoin),
 
             # DHT Routes
+            web.get('/dht/retrieve', self.handle_dht_retrieve),
             web.post('/dht/ping', self.handle_dht_ping),
             web.post('/dht/find_node', self.handle_dht_find_node),
             web.post('/dht/find_value', self.handle_dht_find_value),
@@ -65,6 +66,25 @@ class P2PServer:
         ])
 
         self.known_peer = known_peer  # Url of a peer to join at startup
+
+    async def handle_dht_retrieve(self, request):
+        """
+        GET /dht/retrieve?key=<key_hex>
+        Simple read-only access to local DHT storage (no routing/ping).
+        Used by Web UI to fetch Manifests.
+        """
+        try:
+            key = request.query.get('key')
+            if not key:
+                return web.Response(status=400, text="Missing key")
+
+            # Direct lookup in local storage
+            # Note: We bypass dht.handle_find_value to avoid
+            # polluting routing table with WebUI client info.
+            val = self.dht.storage.get(key)
+            return web.json_response({"value": val})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
 
     async def handle_dht_ping(self, request):
         try:
