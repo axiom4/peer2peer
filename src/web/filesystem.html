@@ -590,9 +590,9 @@
               name: name,
             }),
           });
-          
+
           const result = await res.json();
-          
+
           if (res.ok && result.status === "processing" && result.task_id) {
             // Poll for progress
             const taskId = result.task_id;
@@ -600,56 +600,54 @@
             const statusText = document.getElementById("deleteStatusText");
 
             const pollInterval = setInterval(async () => {
-                try {
-                    const taskRes = await fetch(`/api/progress/${taskId}`);
-                    const task = await taskRes.json();
+              try {
+                const taskRes = await fetch(`/api/progress/${taskId}`);
+                const task = await taskRes.json();
 
-                    if (task.status === "completed") {
-                        clearInterval(pollInterval);
-                        if(progressBar) {
-                            progressBar.style.width = "100%";
-                            progressBar.innerText = "100%";
-                            progressBar.classList.remove("progress-bar-animated");
-                            progressBar.classList.add("bg-success");
-                        }
-                        if(statusText) statusText.innerHTML = '<span class="text-success">Deleted!</span>';
-                        
-                        setTimeout(() => statusDiv.classList.remove("active"), 1500);
-                        loadFilesystem(currentFsPath);
-                        refreshActiveTreeNode();
-                        
-                    } else if (task.status === "error") {
-                        clearInterval(pollInterval);
-                        if(statusText) statusText.innerText = "Error: " + task.message;
-                        if(progressBar) progressBar.classList.add("bg-danger");
-                        setTimeout(() => statusDiv.classList.remove("active"), 3000);
-                    } else {
-                        // Update progress
-                        if(progressBar) {
-                            progressBar.style.width = task.progress + "%";
-                            progressBar.innerText = task.progress + "%";
-                        }
-                        if(statusText) {
-                             // Use innerHTML to handle potential icons or long text truncation
-                             // Truncate to avoid layout shift
-                             let msg = task.message;
-                             if(msg.length > 50) msg = msg.substring(0, 47) + '...';
-                             statusText.innerHTML = `<span class="text-truncate d-block" style="max-width: 100%;">${msg}</span>`;
-                        }
-                    }
-                } catch(e) {
-                    console.error(e);
+                if (task.status === "completed") {
+                  clearInterval(pollInterval);
+                  if (progressBar) {
+                    progressBar.style.width = "100%";
+                    progressBar.innerText = "100%";
+                    progressBar.classList.remove("progress-bar-animated");
+                    progressBar.classList.add("bg-success");
+                  }
+                  if (statusText) statusText.innerHTML = '<span class="text-success">Deleted!</span>';
+
+                  setTimeout(() => statusDiv.classList.remove("active"), 1500);
+                  loadFilesystem(currentFsPath);
+                  refreshActiveTreeNode();
+                } else if (task.status === "error") {
+                  clearInterval(pollInterval);
+                  if (statusText) statusText.innerText = "Error: " + task.message;
+                  if (progressBar) progressBar.classList.add("bg-danger");
+                  setTimeout(() => statusDiv.classList.remove("active"), 3000);
+                } else {
+                  // Update progress
+                  if (progressBar) {
+                    progressBar.style.width = task.progress + "%";
+                    progressBar.innerText = task.progress + "%";
+                  }
+                  if (statusText) {
+                    // Use innerHTML to handle potential icons or long text truncation
+                    // Truncate to avoid layout shift
+                    let msg = task.message;
+                    if (msg.length > 50) msg = msg.substring(0, 47) + "...";
+                    statusText.innerHTML = `<span class="text-truncate d-block" style="max-width: 100%;">${msg}</span>`;
+                  }
                 }
+              } catch (e) {
+                console.error(e);
+              }
             }, 500);
-
           } else if (res.ok && result.status === "ok") {
-             // Fallback for immediate success (legacy or empty)
-             statusDiv.innerHTML = `<div class="text-success small fw-bold">Deleted immediately.</div>`;
-             setTimeout(() => statusDiv.classList.remove("active"), 1000);
-             loadFilesystem(currentFsPath);
-             refreshActiveTreeNode();
+            // Fallback for immediate success (legacy or empty)
+            statusDiv.innerHTML = `<div class="text-success small fw-bold">Deleted immediately.</div>`;
+            setTimeout(() => statusDiv.classList.remove("active"), 1000);
+            loadFilesystem(currentFsPath);
+            refreshActiveTreeNode();
           } else {
-             throw new Error(result.error || result.message);
+            throw new Error(result.error || result.message);
           }
         } catch (e) {
           statusDiv.innerHTML = `

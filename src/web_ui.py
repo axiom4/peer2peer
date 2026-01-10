@@ -1316,17 +1316,21 @@ async def handle_fs_delete(request):
                     if parent_id:
                         parent_json = await fs_fetch_node_fn(parent_id)
                         if parent_json:
-                            parent_node = FS_MANAGER.load_directory(parent_json)
+                            parent_node = FS_MANAGER.load_directory(
+                                parent_json)
                             if name in parent_node.entries:
                                 entry = parent_node.entries[name]
                                 if entry["type"] == "file":
-                                    manifests_to_delete.append((entry["id"], name))
+                                    manifests_to_delete.append(
+                                        (entry["id"], name))
                                 elif entry["type"] == "directory":
                                     TASKS[task_id]["message"] = f"Scanning directory {name}..."
-                                    print(f"Delete: Recursive cleanup target detected: {name}")
+                                    print(
+                                        f"Delete: Recursive cleanup target detected: {name}")
                                     collected = await _recursive_collect_manifests(entry["id"])
                                     manifests_to_delete.extend(collected)
-                                    print(f"Delete: Found {len(collected)} nested files to remove contents for.")
+                                    print(
+                                        f"Delete: Found {len(collected)} nested files to remove contents for.")
 
                 except Exception as e:
                     print(f"Delete Pre-check Error: {e}")
@@ -1350,7 +1354,7 @@ async def handle_fs_delete(request):
                 TASKS[task_id]["message"] = f"Cleaning up {len(manifests_to_delete)} files from network..."
                 total = len(manifests_to_delete)
                 completed = 0
-                
+
                 # Create a wrapper to return the name so we can update UI with specific file name
                 async def delete_with_name(mid, fname):
                     await _delete_file_from_network(mid, name_hint=fname)
@@ -1361,7 +1365,7 @@ async def handle_fs_delete(request):
                     # Fire and forget deletion for each file
                     t = asyncio.create_task(delete_with_name(mid, fname))
                     pending.append(t)
-                
+
                 for i, t in enumerate(asyncio.as_completed(pending)):
                     finished_name = await t
                     completed += 1
