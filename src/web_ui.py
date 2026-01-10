@@ -877,25 +877,42 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
     # Query stable nodes
     gateways = await get_dht_nodes(10)
 
+    # Parallel Fetch (Race)
     async with aiohttp.ClientSession() as session:
+        tasks = []
         for gateway in gateways:
-            try:
-                url = f"{gateway.url}/dht/find_value"
-                payload = {"key": node_id, "sender": {
-                    "sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}}
-                async with session.post(url, json=payload, timeout=2) as resp:
-                    data = await resp.json()
-                    if "value" in data:
-                        val = data["value"]
-                        if isinstance(val, str):
-                            # Cache it!
-                            NODE_CACHE[node_id] = val
-                            return val
-                        json_val = json.dumps(val)
-                        NODE_CACHE[node_id] = json_val
-                        return json_val
-            except Exception:
-                continue
+            url = f"{gateway.url}/dht/find_value"
+            payload = {"key": node_id, "sender": {
+                "sender_id": WEB_UI_NODE_ID, "host": "127.0.0.1", "port": 0}}
+            
+            # Wrap in a task
+            task = asyncio.create_task(session.post(url, json=payload, timeout=2))
+            tasks.append(task)
+        
+        # Wait for first success
+        pending = tasks
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                try:
+                    resp = await task
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if "value" in data:
+                            val = data["value"]
+                            # Cancel pending
+                            for p in pending:
+                                p.cancel()
+                                
+                            if isinstance(val, str):
+                                NODE_CACHE[node_id] = val
+                                return val
+                            json_val = json.dumps(val)
+                            NODE_CACHE[node_id] = json_val
+                            return json_val
+                except Exception:
+                    pass
+                    
     return None
 
 
@@ -1269,12 +1286,22 @@ async def _recursive_collect_manifests(node_id):
             return []
 
         entries = node_data.get("entries", {})
+        
+        # Parallel collection tasks
+        dir_tasks = []
+        
         for item_name, info in entries.items():
             if info["type"] == "file":
                 manifests.append((info["id"], item_name))
             elif info["type"] == "directory":
-                sub_manifests = await _recursive_collect_manifests(info["id"])
-                manifests.extend(sub_manifests)
+                dir_tasks.append(_recursive_collect_manifests(info["id"]))
+        
+        if dir_tasks:
+            results = await asyncio.gather(*dir_tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, list):
+                    manifests.extend(res)
+                    
     except Exception as e:
         print(f"Error recursively collecting manifests for {node_id}: {e}")
 
