@@ -231,6 +231,10 @@ def prune_orphans(args=None):
             if chunk_file.startswith('.'):
                 continue
 
+            # PROTECT DHT INDEX from pruning
+            if chunk_file == 'dht_index.json':
+                continue
+
             if chunk_file not in valid_chunks:
                 try:
                     size = os.path.getsize(chunk_path)
