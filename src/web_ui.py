@@ -1163,16 +1163,17 @@ async def handle_fs_add_file(request):
             return web.json_response({"error": str(e)}, status=500)
 
 
-async def _delete_file_from_network(manifest_id, name_hint=None):
+async def _delete_file_from_network(manifest_id, name_hint=None, peers=None):
     """
     Helper function to delete manifest and chunks from the network.
     Refactored from delete_manifest.
     """
-    print(
-        f"Delete: Starting network deletion for ID={manifest_id} Name={name_hint}")
+    # print(f"Delete: Starting network deletion for ID={manifest_id} Name={name_hint}")
 
-    # 1. Discover Peers
-    peers = await scan_network()
+    # 1. Discover Peers (If not provided)
+    if peers is None:
+        peers = await scan_network()
+    
     # Unique list
     final_peers = list(set(peers)) if peers else []
 
@@ -1383,15 +1384,26 @@ async def handle_fs_delete(request):
                 total = len(manifests_to_delete)
                 completed = 0
 
+                # Fetch peers ONCE for the batch
+                active_peers = await get_active_peers()
+                if not active_peers:
+                    # Fallback scan
+                    active_peers = await scan_network()
+                
+                # Limit concurrency to avoid overloading network/CPU
+                # Semaphore of 10 concurrent deletions
+                sem = asyncio.Semaphore(10)
+
                 # Create a wrapper to return the name so we can update UI with specific file name
-                async def delete_with_name(mid, fname):
-                    await _delete_file_from_network(mid, name_hint=fname)
-                    return fname
+                async def delete_with_name_scan_optimized(mid, fname):
+                    async with sem:
+                        await _delete_file_from_network(mid, name_hint=fname, peers=active_peers)
+                        return fname
 
                 pending = []
                 for mid, fname in manifests_to_delete:
                     # Fire and forget deletion for each file
-                    t = asyncio.create_task(delete_with_name(mid, fname))
+                    t = asyncio.create_task(delete_with_name_scan_optimized(mid, fname))
                     pending.append(t)
 
                 for i, t in enumerate(asyncio.as_completed(pending)):
@@ -1401,6 +1413,9 @@ async def handle_fs_delete(request):
                     percent = 20 + int((completed / total) * 80)
                     TASKS[task_id]["progress"] = percent
                     TASKS[task_id]["message"] = f"Deleted {completed}/{total}: {finished_name}"
+                    # Yield occasionally to allow other coroutines (like progress polling) to run
+                    if i % 2 == 0:
+                        await asyncio.sleep(0.01)
 
             TASKS[task_id]["status"] = "completed"
             TASKS[task_id]["progress"] = 100
