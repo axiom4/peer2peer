@@ -183,10 +183,19 @@ class FilesystemManager:
                 try:
                     node = self.load_directory(content)
                 except ValueError:
-                    pass  # treat as empty if invalid or not a dir
+                    print(f"FS WARNING: Failed to parse directory manifest {current_id}")
+            else:
+                print(f"FS WARNING: Directory manifest {current_id} not found in fetcher!")
 
         if node is None:
-            # Create new directory
+            # CRITICAL: If we are updating an existing path (current_id is set) and we failed to load it,
+            # we are about to destroy data by creating a fresh directory.
+            if current_id:
+                print(f"FS CRITICAL: Data loss prevented. Cannot update path part because {current_id} is missing.")
+                # We should probably raise an error here instead of proceeding with a fresh directory
+                raise RuntimeError(f"Filesystem consistency error: Node {current_id} missing.")
+            
+            # Create new directory (Only valid for new paths or root initialization)
             node = DirectoryNode("dir")
 
         # Base Case: We are at the target container directory

@@ -472,7 +472,11 @@ def distribute(args, progress_callback=None):
     # Choose network type
     if args.entry_node:
         nodes = setup_remote_network(args.entry_node)
-        redundancy = min(len(nodes), 2)
+        # Use requested redundancy but capped at available nodes
+        req_redundancy = getattr(args, 'redundancy', 5)
+        redundancy = min(len(nodes), req_redundancy)
+        if redundancy < 1:
+            redundancy = 1
     elif args.scan:
         print("Auto-scanning network...")
         # Use async utility function to find peers

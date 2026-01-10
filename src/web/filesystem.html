@@ -694,7 +694,7 @@
         }
       }
 
-      // External File Drop (Upload)
+      // External File Drop (Upload with Folder Support)
       function handleFileDragOver(ev) {
         ev.preventDefault();
         ev.dataTransfer.dropEffect = "copy";
@@ -705,113 +705,195 @@
         document.getElementById("fsCard").classList.remove("border-primary", "border-3");
       }
 
-      function handleFileDrop(ev) {
+      async function handleFileDrop(ev) {
         ev.preventDefault();
         document.getElementById("fsCard").classList.remove("border-primary", "border-3");
 
-        if (ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
-          const file = ev.dataTransfer.files[0]; // Support single file for now
-          if (confirm(`Upload '${file.name}' to current folder?`)) {
-            uploadFileDirectly(file);
+        const items = ev.dataTransfer.items;
+        if (!items || items.length === 0) return;
+
+        if (!confirm(`Upload ${items.length} items to current folder?`)) return;
+
+        // Process all items
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i].webkitGetAsEntry();
+          if (item) {
+            await traverseFileTree(item);
           }
         }
       }
 
-      function uploadFileDirectly(file) {
-        const replicas = document.getElementById("replicasInput").value || 5;
-        const compression = document.getElementById("compressionCheck").checked;
-        const targetFsPath = currentFsPath;
+      async function traverseFileTree(item) {
+        if (item.isFile) {
+          return new Promise((resolve, reject) => {
+              item.file((file) => {
+                 const relativeFolder = item.fullPath.substring(0, item.fullPath.lastIndexOf("/")); 
+                 const targetDir = (currentFsPath === "/" ? "" : currentFsPath) + relativeFolder;
+                 
+                 ensureDirectory(targetDir).then(() => {
+                     // Upload and wait for completion to serialize uploads
+                     return uploadFileDirectly(file, targetDir); 
+                 }).then(resolve).catch((e) => {
+                     console.error("Upload failed", e);
+                     resolve(); // Continue anyway
+                 });
+              }, (e) => resolve()); 
+          });
 
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("redundancy", replicas);
-        formData.append("compression", compression);
-
-        const statusDiv = document.getElementById("uploadStatus");
-        statusDiv.className = "active"; // Show container
-        statusDiv.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <strong class="small">Uploading ${file.name}</strong>
-                <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
-            </div>
-            <div class="progress mb-2" style="height: 15px;">
-                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-            <div id="statusText" class="text-muted small" style="font-size: 0.8em">Starting...</div>
-          `;
-
-        // No scroll needed for floating element
-        // statusDiv.scrollIntoView({behavior: "smooth"});
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/upload", true);
-
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            const progressBar = document.getElementById("progressBar");
-            const visualPercent = Math.round(percent * 0.4);
-
-            if (progressBar) {
-              progressBar.style.width = visualPercent + "%";
-              progressBar.innerText = visualPercent + "%";
-            }
+        } else if (item.isDirectory) {
+          // Create directory
+          const dirPath = (currentFsPath === "/" ? "" : currentFsPath) + item.fullPath;
+          await ensureDirectory(dirPath);
+          
+          const dirReader = item.createReader();
+          const entries = await getAllEntries(dirReader);
+          
+          for (const entry of entries) {
+             await traverseFileTree(entry);
           }
-        };
+        }
+      }
 
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            const result = JSON.parse(xhr.responseText);
-            if (result.status === "processing" && result.task_id) {
-              const taskId = result.task_id;
-              const progressBar = document.getElementById("progressBar");
-              const statusText = document.getElementById("statusText");
+      function getAllEntries(dirReader) {
+          return new Promise((resolve, reject) => {
+              let entriesList = [];
+              const read = () => {
+                  dirReader.readEntries((results) => {
+                      if (!results.length) {
+                          resolve(entriesList);
+                      } else {
+                          entriesList = entriesList.concat(results);
+                          read();
+                      }
+                  }, (e) => reject(e));
+              };
+              read();
+          });
+      }
 
-              if (progressBar) progressBar.classList.add("bg-success");
+      async function ensureDirectory(fullPath) {
+          if(!fullPath || fullPath === "/") return;
+          const lastSlash = fullPath.lastIndexOf("/");
+          const parentPath = fullPath.substring(0, lastSlash) || "/";
+          const newName = fullPath.substring(lastSlash + 1);
 
-              const pollInterval = setInterval(async () => {
-                const res = await fetch(`/api/progress/${taskId}`);
-                const task = await res.json();
+          try {
+              await fetch("/api/fs/mkdir", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: parentPath, name: newName }),
+              });
+          } catch(e) { console.warn("Mkdir error", e); }
+      }
 
-                if (task.status === "completed") {
-                  clearInterval(pollInterval);
-                  if (progressBar) {
-                    progressBar.style.width = "100%";
-                    progressBar.innerText = "100%";
-                  }
-                  if (statusText) statusText.innerText = task.message;
-
-                  const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
-                  if (match && match[1]) {
-                    statusDiv.innerHTML = `
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <strong class="text-success">Upload Complete!</strong>
-                                        <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
-                                    </div>
-                                    <div class="alert alert-success fs-6 p-2 mb-0">ID: ${match[1].substring(0, 16)}...</div>
-                                  `;
-                    addFileToFs(match[1], file.name, file.size, targetFsPath);
-                  }
-
-                  setTimeout(() => {
-                    statusDiv.classList.remove("active");
-                  }, 3000);
-                } else if (task.status === "error") {
-                  clearInterval(pollInterval);
-                  statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2">${task.message}</div><button class="btn btn-sm btn-light mt-2 w-100" onclick="document.getElementById('uploadStatus').classList.remove('active')">Close</button>`;
-                } else {
-                  if (progressBar) {
-                    let p = task.percent;
-                    let visualP = 40 + Math.round(p * 0.6);
-                    progressBar.style.width = visualP + "%";
-                    progressBar.innerText = visualP + "%";
-                  }
+      function uploadFileDirectly(file, targetPath = null) {
+        return new Promise((resolve, reject) => {
+            const replicas = document.getElementById("replicasInput").value || 5;
+            const compression = document.getElementById("compressionCheck").checked;
+            const targetFsPath = targetPath || currentFsPath;
+    
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("redundancy", replicas);
+            formData.append("compression", compression);
+    
+            const statusDiv = document.getElementById("uploadStatus");
+            statusDiv.className = "active"; // Show container
+            statusDiv.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong class="small">Uploading ${file.name}</strong>
+                    <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
+                </div>
+                <div class="progress mb-2" style="height: 15px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div id="statusText" class="text-muted small" style="font-size: 0.8em">Starting...</div>
+              `;
+    
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/upload", true);
+    
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                const progressBar = document.getElementById("progressBar");
+                const visualPercent = Math.round(percent * 0.4); // UI Trick: Upload is 40%
+    
+                if (progressBar) {
+                  progressBar.style.width = visualPercent + "%";
+                  progressBar.innerText = visualPercent + "%";
                 }
-              }, 500);
-            }
-          }
-        };
-        xhr.send(formData);
+              }
+            };
+    
+            xhr.onload = () => {
+              if (xhr.status === 200) {
+                try {
+                    const result = JSON.parse(xhr.responseText);
+                    if (result.status === "processing" && result.task_id) {
+                      const taskId = result.task_id;
+                      const progressBar = document.getElementById("progressBar");
+                      const statusText = document.getElementById("statusText");
+        
+                      if (progressBar) progressBar.classList.add("bg-success");
+        
+                      const pollInterval = setInterval(async () => {
+                        try {
+                            const res = await fetch(`/api/progress/${taskId}`);
+                            const task = await res.json();
+            
+                            if (task.status === "completed") {
+                              clearInterval(pollInterval);
+                              if (progressBar) {
+                                progressBar.style.width = "100%";
+                                progressBar.innerText = "100%";
+                              }
+                              if (statusText) statusText.innerText = task.message;
+            
+                              const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
+                              if (match && match[1]) {
+                                // Add to FS but don't auto-close immediately if we want to show success
+                                await addFileToFs(match[1], file.name, file.size, targetFsPath);
+                              }
+                              
+                              // Complete Promise
+                              resolve(match ? match[1] : true);
+            
+                              // Hide after short delay to allow visual confirmation
+                              setTimeout(() => {
+                                // Only hide if it's the same upload (simplified logic: just hide)
+                                // In serial mode, next upload will show it again immediately.
+                                statusDiv.classList.remove("active");
+                              }, 1000);
+                            } else if (task.status === "error") {
+                              clearInterval(pollInterval);
+                              statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2">${task.message}</div>`;
+                              reject(new Error(task.message));
+                            } else {
+                              if (progressBar) {
+                                let p = task.percent;
+                                let visualP = 40 + Math.round(p * 0.6); // UI Trick: Processing is 60%
+                                progressBar.style.width = visualP + "%";
+                                progressBar.innerText = visualP + "%";
+                              }
+                              if (statusText) statusText.innerText = task.message;
+                            }
+                        } catch(e) {
+                            clearInterval(pollInterval);
+                            reject(e);
+                        }
+                      }, 500);
+                    } else {
+                        reject(new Error("Invalid server response"));
+                    }
+                } catch(e) { reject(e); }
+              } else {
+                  reject(new Error("Upload failed: " + xhr.status));
+              }
+            };
+            xhr.onerror = () => reject(new Error("Network error"));
+            xhr.send(formData);
+        });
       }
     </script>
   </body>

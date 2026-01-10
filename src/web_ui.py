@@ -42,13 +42,47 @@ except ImportError:
 
 import uuid
 import hashlib
+import random
 from typing import Optional
 
 # Global task tracker
 TASKS = {}
 FS_MANAGER = FilesystemManager()
 FS_ROOT_KEY = "filesystem_root_v1"
+FS_LOCK = asyncio.Lock()  # Serialize FS modifications
 WEB_UI_NODE_ID = hashlib.sha256(b"web_ui_client").hexdigest()
+CACHED_ROOT_ID = None  # In-memory cache for strict consistency during updates
+NODE_CACHE = {}  # In-memory cache for directory manifests (ID -> JSON content)
+
+# Peer Cache to avoid redundant network scans
+PEER_CACHE = set()
+LAST_PEER_SCAN = 0
+PEER_SCAN_LOCK = asyncio.Lock()
+CACHE_TTL = 300  # 5 minutes
+
+async def get_active_peers():
+    """Returns a list of cached peers or performs a scan if cache is stale."""
+    global PEER_CACHE, LAST_PEER_SCAN
+    import time
+    
+    async with PEER_SCAN_LOCK:
+        now = time.time()
+        if PEER_CACHE and (now - LAST_PEER_SCAN < CACHE_TTL):
+            return list(PEER_CACHE)
+        
+        # Cache expired or empty, perform scan
+        try:
+            # Run scan in executor to avoid blocking if it was blocking (scan_network is async though)
+            # scan_network is async, so we await it directly
+            found = await scan_network(timeout=3)
+            if found:
+                PEER_CACHE.update(found)
+                LAST_PEER_SCAN = now
+                print(f"Updated Peer Cache: {len(PEER_CACHE)} peers")
+            return list(PEER_CACHE)
+        except Exception as e:
+            print(f"Peer scan failed: {e}")
+            return list(PEER_CACHE)
 
 
 async def handle_index(request):
@@ -115,6 +149,10 @@ async def upload_file(request):
 
         if field.name == 'file':
             filename = field.filename
+            # Security fix: Ensure strictly flat filename, no directories
+            if filename:
+                filename = os.path.basename(filename)
+            
             upload_dir = "uploads_temp"
             os.makedirs(upload_dir, exist_ok=True)
             temp_path = os.path.join(upload_dir, filename)
@@ -141,11 +179,16 @@ async def upload_file(request):
     if not temp_path:
         return web.json_response({"status": "error", "message": "No file uploaded"}, status=400)
 
+    # Resolve network peers once to reuse connection info
+    cached_peers = await get_active_peers()
+    entry_node = random.choice(cached_peers) if cached_peers else None
+    use_scan = (entry_node is None)
+
     # Prepare args for distribute
     args = SimpleNamespace(
         file=temp_path,
-        entry_node=None,
-        scan=True,
+        entry_node=entry_node,
+        scan=use_scan,
         redundancy=redundancy,
         compression=compression
     )
@@ -166,10 +209,13 @@ async def upload_file(request):
 
     # Wrapper to properly await the executor future and handle top-level exceptions
     async def background_distribute():
+        print(f"[Upload Task {task_id}] Starting distribution for {temp_path}")
         try:
             await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
         except Exception as e:
-            print(f"Background distribution error: {e}")
+            print(f"[Upload Task {task_id}] Background distribution error: {e}")
+            import traceback
+            traceback.print_exc()
             TASKS[task_id]["status"] = "error"
             TASKS[task_id]["message"] = f"Internal Error: {str(e)}"
         finally:
@@ -820,6 +866,12 @@ async def get_dht_nodes(count=5):
 
 
 async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
+    # Check local cache first (Read-Your-Writes)
+    if node_id in NODE_CACHE:
+        # print(f"FS DEBUG: Cache HIT for {node_id[:8]}")
+        return NODE_CACHE[node_id]
+
+    print(f"FS DEBUG: Cache MISS for {node_id[:8]}, querying network...")
     # Query stable nodes
     gateways = await get_dht_nodes(10)
 
@@ -834,8 +886,12 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
                     if "value" in data:
                         val = data["value"]
                         if isinstance(val, str):
+                            # Cache it!
+                            NODE_CACHE[node_id] = val
                             return val
-                        return json.dumps(val)
+                        json_val = json.dumps(val)
+                        NODE_CACHE[node_id] = json_val
+                        return json_val
             except Exception:
                 continue
     return None
@@ -845,6 +901,9 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
     # Replicate to multiple nodes
     gateways = await get_dht_nodes(5)
     node_hash = node.get_hash()
+    
+    # Update local cache immediately
+    NODE_CACHE[node_hash] = node.to_json()
 
     success_count = 0
     async with aiohttp.ClientSession() as session:
@@ -873,6 +932,10 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
 
 
 async def fs_get_root_id() -> Optional[str]:
+    global CACHED_ROOT_ID
+    if CACHED_ROOT_ID:
+        return CACHED_ROOT_ID
+
     # Try to find root key on any node
     gateways = await get_dht_nodes(10)
     async with aiohttp.ClientSession() as session:
@@ -884,6 +947,7 @@ async def fs_get_root_id() -> Optional[str]:
                 async with session.post(url, json=payload, timeout=2) as resp:
                     data = await resp.json()
                     if "value" in data:
+                        CACHED_ROOT_ID = data["value"]
                         return data["value"]
             except Exception:
                 pass
@@ -891,6 +955,9 @@ async def fs_get_root_id() -> Optional[str]:
 
 
 async def fs_set_root_id(new_root_id: str):
+    global CACHED_ROOT_ID
+    CACHED_ROOT_ID = new_root_id
+
     # Publish to MANY nodes to ensure availability
     gateways = await get_dht_nodes(10)
 
@@ -991,34 +1058,45 @@ async def handle_fs_mkdir(request):
     else:
         full_path = f"{base_path}/{new_dir_name}".replace("//", "/")
 
-    root_id = await fs_get_root_id()
+    async with FS_LOCK:
+        root_id = await fs_get_root_id()
 
-    # Create empty directory
-    new_dir = DirectoryNode(new_dir_name)
-    new_dir_id = await fs_store_node_fn(new_dir)
+        # Idempotency Check: Don't overwrite if it exists!
+        try:
+            existing_id = await FS_MANAGER.resolve_path(root_id, full_path, fs_fetch_node_fn)
+            if existing_id:
+                # Directory already exists, return Success immediately
+                # (We could check if it is indeed a directory, but resolving implies existence)
+                return web.json_response({"status": "ok", "path": full_path, "message": "exists"})
+        except Exception:
+            pass
+            
+        # Create empty directory
+        new_dir = DirectoryNode(new_dir_name)
+        new_dir_id = await fs_store_node_fn(new_dir)
 
-    entry_data = {
-        "type": "directory",
-        "id": new_dir_id,
-        "size": 0
-    }
+        entry_data = {
+            "type": "directory",
+            "id": new_dir_id,
+            "size": 0
+        }
 
-    try:
-        new_root_id = await FS_MANAGER.update_path(
-            root_id,
-            base_path,
-            new_dir_name,
-            entry_data,
-            fs_fetch_node_fn,
-            fs_store_node_fn
-        )
+        try:
+            new_root_id = await FS_MANAGER.update_path(
+                root_id,
+                base_path,
+                new_dir_name,
+                entry_data,
+                fs_fetch_node_fn,
+                fs_store_node_fn
+            )
 
-        await fs_set_root_id(new_root_id)
-        return web.json_response({"status": "ok", "path": full_path})
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return web.json_response({"error": str(e)}, status=500)
+            await fs_set_root_id(new_root_id)
+            return web.json_response({"status": "ok", "path": full_path})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return web.json_response({"error": str(e)}, status=500)
 
 
 async def handle_fs_add_file(request):
@@ -1039,29 +1117,30 @@ async def handle_fs_add_file(request):
     if not file_name or not file_id:
         return web.json_response({"error": "Name and ID required"}, status=400)
 
-    root_id = await fs_get_root_id()
+    async with FS_LOCK:
+        root_id = await fs_get_root_id()
 
-    entry_data = {
-        "type": "file",
-        "id": file_id,
-        "size": file_size
-    }
+        entry_data = {
+            "type": "file",
+            "id": file_id,
+            "size": file_size
+        }
 
-    try:
-        new_root_id = await FS_MANAGER.update_path(
-            root_id,
-            base_path,
-            file_name,
-            entry_data,
-            fs_fetch_node_fn,
-            fs_store_node_fn
-        )
+        try:
+            new_root_id = await FS_MANAGER.update_path(
+                root_id,
+                base_path,
+                file_name,
+                entry_data,
+                fs_fetch_node_fn,
+                fs_store_node_fn
+            )
 
-        await fs_set_root_id(new_root_id)
-        return web.json_response({"status": "ok", "path": f"{base_path}/{file_name}"})
-    except Exception as e:
-        print(f"Error adding file to FS: {e}")
-        return web.json_response({"error": str(e)}, status=500)
+            await fs_set_root_id(new_root_id)
+            return web.json_response({"status": "ok", "path": f"{base_path}/{file_name}"})
+        except Exception as e:
+            print(f"Error adding file to FS: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
 
 async def _delete_file_from_network(manifest_id, name_hint=None):
@@ -1215,58 +1294,55 @@ async def handle_fs_delete(request):
     if not name:
         return web.json_response({"error": "Name required"}, status=400)
 
-    root_id = await fs_get_root_id()
-
-    # Pre-check: Resolve parent to identify what we are deleting (file or dir)
-    # If it's a directory, we need to recursively find all files inside it to delete chunks.
-    manifests_to_delete = []
-
     try:
-        # Resolve parent directory
-        parent_id = await FS_MANAGER.resolve_path(root_id, base_path, fs_fetch_node_fn)
-        if parent_id:
-            parent_json = await fs_fetch_node_fn(parent_id)
-            if parent_json:
-                parent_node = FS_MANAGER.load_directory(parent_json)
-                if name in parent_node.entries:
-                    entry = parent_node.entries[name]
+        async with FS_LOCK:
+            root_id = await fs_get_root_id()
 
-                    if entry["type"] == "file":
-                        manifests_to_delete.append(entry["id"])
-                    elif entry["type"] == "directory":
-                        print(
-                            f"Delete: Recursive cleanup target detected: {name}")
-                        collected = await _recursive_collect_manifests(entry["id"])
-                        manifests_to_delete.extend(collected)
-                        print(
-                            f"Delete: Found {len(collected)} nested files to remove contents for.")
+            # Pre-check: Resolve parent to identify what we are deleting (file or dir)
+            manifests_to_delete = []
+            try:
+                # Resolve parent directory
+                parent_id = await FS_MANAGER.resolve_path(root_id, base_path, fs_fetch_node_fn)
+                if parent_id:
+                    parent_json = await fs_fetch_node_fn(parent_id)
+                    if parent_json:
+                        parent_node = FS_MANAGER.load_directory(parent_json)
+                        if name in parent_node.entries:
+                            entry = parent_node.entries[name]
+                            if entry["type"] == "file":
+                                manifests_to_delete.append(entry["id"])
+                            elif entry["type"] == "directory":
+                                print(f"Delete: Recursive cleanup target detected: {name}")
+                                collected = await _recursive_collect_manifests(entry["id"])
+                                manifests_to_delete.extend(collected)
+                                print(f"Delete: Found {len(collected)} nested files to remove contents for.")
+            except Exception as e:
+                print(f"Delete Pre-check Error: {e}")
 
-    except Exception as e:
-        print(f"Delete Pre-check Error: {e}")
+            # Perform deletion
+            new_root_id = await FS_MANAGER.delete_path(
+                root_id,
+                base_path,
+                name,
+                fs_fetch_node_fn,
+                fs_store_node_fn
+            )
+            
+            await fs_set_root_id(new_root_id)
 
-    try:
-        new_root_id = await FS_MANAGER.delete_path(
-            root_id,
-            base_path,
-            name,
-            fs_fetch_node_fn,
-            fs_store_node_fn
-        )
-
-        await fs_set_root_id(new_root_id)
-
-        # Trigger network deletion for all identified file manifests
+        # Post-Lock: Trigger network deletion for all identified file manifests
         if manifests_to_delete:
-            print(
-                f"Delete: Triggering network cleanup for {len(manifests_to_delete)} files.")
+            print(f"Delete: Triggering network cleanup for {len(manifests_to_delete)} files.")
             for mid in manifests_to_delete:
                 # Fire and forget deletion for each file
                 asyncio.create_task(_delete_file_from_network(
                     mid, name_hint=name if len(manifests_to_delete) == 1 else None))
 
         return web.json_response({"status": "ok"})
+
     except Exception as e:
-        print(f"Error deleting FS entry: {e}")
+        import traceback
+        traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
 
