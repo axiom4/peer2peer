@@ -568,6 +568,19 @@
       async function deleteFsEntry(name) {
         if (!confirm(`Are you sure you want to delete '${name}'?`)) return;
 
+        // Show Deletion Progress
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.className = "active";
+        statusDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="small"><i class="fas fa-trash me-2"></i>Deleting '${name}'...</strong>
+            </div>
+            <div class="progress mb-2" style="height: 15px;">
+                <div id="deleteProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-danger" role="progressbar" style="width: 5%;">5%</div>
+            </div>
+            <div id="deleteStatusText" class="text-muted small" style="min-height: 1.2em;">Initializing...</div>
+        `;
+
         try {
           const res = await fetch("/api/fs/delete", {
             method: "POST",
@@ -577,15 +590,73 @@
               name: name,
             }),
           });
+          
           const result = await res.json();
-          if (res.ok) {
-            loadFilesystem(currentFsPath);
-            refreshActiveTreeNode();
+          
+          if (res.ok && result.status === "processing" && result.task_id) {
+            // Poll for progress
+            const taskId = result.task_id;
+            const progressBar = document.getElementById("deleteProgressBar");
+            const statusText = document.getElementById("deleteStatusText");
+
+            const pollInterval = setInterval(async () => {
+                try {
+                    const taskRes = await fetch(`/api/progress/${taskId}`);
+                    const task = await taskRes.json();
+
+                    if (task.status === "completed") {
+                        clearInterval(pollInterval);
+                        if(progressBar) {
+                            progressBar.style.width = "100%";
+                            progressBar.innerText = "100%";
+                            progressBar.classList.remove("progress-bar-animated");
+                            progressBar.classList.add("bg-success");
+                        }
+                        if(statusText) statusText.innerHTML = '<span class="text-success">Deleted!</span>';
+                        
+                        setTimeout(() => statusDiv.classList.remove("active"), 1500);
+                        loadFilesystem(currentFsPath);
+                        refreshActiveTreeNode();
+                        
+                    } else if (task.status === "error") {
+                        clearInterval(pollInterval);
+                        if(statusText) statusText.innerText = "Error: " + task.message;
+                        if(progressBar) progressBar.classList.add("bg-danger");
+                        setTimeout(() => statusDiv.classList.remove("active"), 3000);
+                    } else {
+                        // Update progress
+                        if(progressBar) {
+                            progressBar.style.width = task.progress + "%";
+                            progressBar.innerText = task.progress + "%";
+                        }
+                        if(statusText) {
+                             // Use innerHTML to handle potential icons or long text truncation
+                             // Truncate to avoid layout shift
+                             let msg = task.message;
+                             if(msg.length > 50) msg = msg.substring(0, 47) + '...';
+                             statusText.innerHTML = `<span class="text-truncate d-block" style="max-width: 100%;">${msg}</span>`;
+                        }
+                    }
+                } catch(e) {
+                    console.error(e);
+                }
+            }, 500);
+
+          } else if (res.ok && result.status === "ok") {
+             // Fallback for immediate success (legacy or empty)
+             statusDiv.innerHTML = `<div class="text-success small fw-bold">Deleted immediately.</div>`;
+             setTimeout(() => statusDiv.classList.remove("active"), 1000);
+             loadFilesystem(currentFsPath);
+             refreshActiveTreeNode();
           } else {
-            alert("Error: " + (result.error || result.message));
+             throw new Error(result.error || result.message);
           }
         } catch (e) {
-          alert("Error: " + e);
+          statusDiv.innerHTML = `
+             <div class="mb-2"><strong class="small text-danger">Error</strong></div>
+             <div class="small text-danger">${e}</div>
+          `;
+          setTimeout(() => statusDiv.classList.remove("active"), 3000);
         }
       }
 
