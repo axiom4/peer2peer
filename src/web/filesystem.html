@@ -335,26 +335,26 @@
       });
 
       // --- Tree Logic ---
-      
+
       // Refresh the currently active tree node (node corresponding to currentFsPath)
       // This ensures that if we added/removed folders, the tree reflects it WITHOUT collapsing everything.
       async function refreshActiveTreeNode() {
-         const activeItem = document.querySelector(`.tree-item[data-path="${currentFsPath}"]`);
-         if (activeItem) {
-             const parentDiv = activeItem.parentElement; 
-             const group = parentDiv.nextElementSibling; // .tree-group
-             // Only reload if it is already expanded (has .show class)
-             // or if we want to force expansion? Maybe just reload if known.
-             // Usually we just want to update content. 
-             if (group && group.classList.contains('show')) {
-                 await loadTreePath(currentFsPath, group);
-             } else {
-                 // If not expanded, we might want to at least ensure the arrow is correct?
-                 // But loadTreePath handles content.
-                 // If it was empty and now has content, we might want to update the toggle icon?
-                 // But toggle logic handles lazy load.
-             }
-         }
+        const activeItem = document.querySelector(`.tree-item[data-path="${currentFsPath}"]`);
+        if (activeItem) {
+          const parentDiv = activeItem.parentElement;
+          const group = parentDiv.nextElementSibling; // .tree-group
+          // Only reload if it is already expanded (has .show class)
+          // or if we want to force expansion? Maybe just reload if known.
+          // Usually we just want to update content.
+          if (group && group.classList.contains("show")) {
+            await loadTreePath(currentFsPath, group);
+          } else {
+            // If not expanded, we might want to at least ensure the arrow is correct?
+            // But loadTreePath handles content.
+            // If it was empty and now has content, we might want to update the toggle icon?
+            // But toggle logic handles lazy load.
+          }
+        }
       }
 
       async function refreshTreeRoot() {
