@@ -544,39 +544,44 @@ async def delete_manifest(request):
             # 1. First, search Catalog for this filename to get the authoritative ID
             # This fixes issues where local file hash differs from cloud catalog ID
             print(f"Delete: Searching catalog for ID of '{name}'...")
-            from src.main import CatalogClient 
+            from src.main import CatalogClient
             # We need remote nodes for catalog client
-            cat_nodes = [RemoteHttpNode(u) for u in final_peers] if final_peers else [RemoteHttpNode(f"http://127.0.0.1:{p}") for p in range(8000, 8005)]
-            
+            cat_nodes = [RemoteHttpNode(u) for u in final_peers] if final_peers else [
+                RemoteHttpNode(f"http://127.0.0.1:{p}") for p in range(8000, 8005)]
+
             cat_client = CatalogClient()
             items = await cat_client.fetch(cat_nodes)
-            
+
             found_ids_in_catalog = []
             target_filename = name.replace('.manifest', '')
-            
+
             for item in items:
                 # Match Name (Case insensitive or exact?) Exact for now
                 if item.get('name') == target_filename or item.get('name') == name:
                     found_ids_in_catalog.append(item['id'])
-            
+
             if found_ids_in_catalog:
-                print(f"Delete: Found matching IDs in catalog: {found_ids_in_catalog}")
-                manifest_id_to_delete = found_ids_in_catalog[0] # Take first match
-            
+                print(
+                    f"Delete: Found matching IDs in catalog: {found_ids_in_catalog}")
+                # Take first match
+                manifest_id_to_delete = found_ids_in_catalog[0]
+
             with open(manifest_path, 'r') as f:
                 # Read content to calculate Hash ID for Catalog removal
                 content_str = f.read()
                 data = json.loads(content_str)
                 chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-                
+
                 if not manifest_id_to_delete:
                     # Calculate Manifest ID (Hash of the JSON string as it was distributed)
                     try:
                         # Re-serialize to match standard (Compact, no space) if possible or use read content
                         # The Standard used in 'distribute' is: json.dumps(dict).encode('utf-8')
                         norm_bytes = json.dumps(data).encode('utf-8')
-                        manifest_id_to_delete = hashlib.sha256(norm_bytes).hexdigest()
-                        print(f"Delete: Calculated ID from local file: {manifest_id_to_delete}")
+                        manifest_id_to_delete = hashlib.sha256(
+                            norm_bytes).hexdigest()
+                        print(
+                            f"Delete: Calculated ID from local file: {manifest_id_to_delete}")
                     except Exception as e:
                         print(f"Delete: Could not calculate ID: {e}")
 
@@ -589,10 +594,11 @@ async def delete_manifest(request):
     # Use discovered peers for propagation (Gossip Protocol)
     # The network will propagate the deletion request.
     broadcast_targets = list(final_peers) if final_peers else []
-    
+
     # Fallback to seed nodes if discovery failed, to kickstart gossip
     if not broadcast_targets:
-        broadcast_targets = [f"http://127.0.0.1:{p}" for p in range(8000, 8003)]
+        broadcast_targets = [
+            f"http://127.0.0.1:{p}" for p in range(8000, 8003)]
 
     if broadcast_targets and (chunks_to_delete or manifest_id_to_delete):
         async with aiohttp.ClientSession() as session:
@@ -605,10 +611,11 @@ async def delete_manifest(request):
                 for i in range(0, len(chunks_to_delete), batch_size):
                     batch = chunks_to_delete[i:i + batch_size]
                     payload = {"chunk_ids": batch}
-                    
+
                     for peer in broadcast_targets:
                         # Use the new batch endpoint
-                        tasks.append(session.post(f"{peer}/chunks/delete_batch", json=payload, timeout=3))
+                        tasks.append(session.post(
+                            f"{peer}/chunks/delete_batch", json=payload, timeout=3))
 
             # 2. DELETE MANIFEST CHUNK (Single ID)
             # Manifest itself is also a chunk (the file content), so we delete it specifically
@@ -619,10 +626,12 @@ async def delete_manifest(request):
                 # Simpler: just fire a single batch for it too.
                 payload_manifest = {"chunk_ids": [manifest_id_to_delete]}
                 for peer in broadcast_targets:
-                     tasks.append(session.post(f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=3))
+                    tasks.append(session.post(
+                        f"{peer}/chunks/delete_batch", json=payload_manifest, timeout=3))
 
             if tasks:
-                print(f"Delete: Starting BATCH propagation via {len(broadcast_targets)} entry nodes...")
+                print(
+                    f"Delete: Starting BATCH propagation via {len(broadcast_targets)} entry nodes...")
                 await asyncio.gather(*tasks, return_exceptions=True)
 
     # 4. Remove from DHT Public Catalog
@@ -630,8 +639,9 @@ async def delete_manifest(request):
         target_id = manifest_id_to_delete if manifest_id_to_delete else name
         try:
             # Re-use broadcast_targets calculated above
-            print(f"Delete: Broadcasting CATALOG REMOVAL to {len(broadcast_targets)} nodes...")
-            
+            print(
+                f"Delete: Broadcasting CATALOG REMOVAL to {len(broadcast_targets)} nodes...")
+
             if broadcast_targets:
                 from src.network.remote_node import RemoteHttpNode
                 # Quick wrapper

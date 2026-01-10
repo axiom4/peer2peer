@@ -311,7 +311,8 @@ class DHT:
                         item_id = get_id_safe(item)
                         # Logic: Remove if ID matches OR if exact string matches
                         if item_id == target_id:
-                            print(f"  -> REMOVED item by ID match: {target_id}")
+                            print(
+                                f"  -> REMOVED item by ID match: {target_id}")
                             continue
                         if item == value:
                             print(f"  -> REMOVED item by String match")

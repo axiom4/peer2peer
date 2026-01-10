@@ -334,7 +334,8 @@ class CatalogClient:
         key = self.get_catalog_key()
         dht_key = "catalog_" + key[:56]
 
-        print(f"Removing from Catalog {dht_key} and Purging Key {manifest_id[:8]}...")
+        print(
+            f"Removing from Catalog {dht_key} and Purging Key {manifest_id[:8]}...")
 
         client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
         client_info = {"sender_id": client_id_hex,
@@ -346,7 +347,7 @@ class CatalogClient:
             "value": manifest_id,
             "sender": client_info
         }
-        
+
         # Payload 2: Remove ID key (if stored as KV)
         payload_kv = {
             "key": manifest_id,
