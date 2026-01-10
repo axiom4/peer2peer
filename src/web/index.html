@@ -45,9 +45,9 @@
           <span class="fs-4">P2P Storage System</span>
         </a>
         <nav>
-          <a href="/" class="btn btn-primary me-2">Dashboard</a>
-          <a href="/filesystem" class="btn btn-outline-primary me-2">Filesystem</a>
-          <a href="/topology" class="btn btn-outline-primary">Network Topology</a>
+          <a href="/" class="btn btn-primary me-2"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a>
+          <a href="/filesystem" class="btn btn-outline-primary me-2"><i class="fas fa-folder me-1"></i> Filesystem</a>
+          <a href="/topology" class="btn btn-outline-primary"><i class="fas fa-project-diagram me-1"></i> Network Topology</a>
         </nav>
       </header>
 
@@ -57,7 +57,7 @@
           <div class="scrollable-col">
             <!-- Download Card -->
             <div class="card mb-4">
-              <div class="card-header bg-dark text-white">Download from Network</div>
+              <div class="card-header bg-dark text-white"><i class="fas fa-cloud-download-alt me-2"></i> Download from Network</div>
               <div class="card-body">
                 <div class="input-group">
                   <input type="text" id="manifestIdInput" class="form-control" placeholder="Enter Manifest Hash ID (64 chars)" aria-label="Manifest Hash" />
@@ -69,7 +69,7 @@
 
             <!-- Upload Card -->
             <div class="card">
-              <div class="card-header bg-primary text-white">Upload New File</div>
+              <div class="card-header bg-primary text-white"><i class="fas fa-cloud-upload-alt me-2"></i> Upload New File</div>
               <div class="card-body">
                 <form id="uploadForm">
                   <div class="mb-3">
@@ -105,7 +105,7 @@
           <!-- Public Catalog Card -->
           <div class="card h-100-card">
             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-              <span>🌍 Public Network Catalog</span>
+              <span><i class="fas fa-globe me-2"></i> Public Network Catalog</span>
               <button class="btn btn-sm btn-outline-light" onclick="loadCatalog()">Refresh</button>
             </div>
             <div class="card-body p-0 d-flex flex-column" style="min-height: 0">
