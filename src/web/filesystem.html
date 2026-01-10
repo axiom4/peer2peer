@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P2P Filesystem</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+      /* Full height layout */
+      html, body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden; /* Prevent body scroll */
+      }
+      .container {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding-bottom: 0px !important; 
+      }
+      /* Ensure the card wrapper grows to fill space */
+      .fs-grow {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        margin-bottom: 1rem !important;
+      }
+      #fsCard {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      #fsCard .card-body {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0; /* Flexbox scroll fix */
+      }
+      #uploadStatus {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 300px;
+        z-index: 1050; /* Above everything */
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        display: none; /* Hidden by default */
+        border: 1px solid #dee2e6;
+      }
+      /* Show when it has content (script will handle display block/none) */
+      #uploadStatus.active {
+        display: block;
+      }
+    </style>
+  </head>
+  <body class="bg-light">
+    <div class="container py-4">
+      <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
+        <a href="/" class="d-flex align-items-center text-dark text-decoration-none">
+          <span class="fs-4">P2P Storage System</span>
+        </a>
+        <nav>
+            <a href="/" class="btn btn-outline-primary me-2">Dashboard</a>
+            <a href="/filesystem" class="btn btn-primary me-2">Filesystem</a>
+            <a href="/topology" class="btn btn-outline-primary">Network Topology</a>
+        </nav>
+      </header>
+
+      <!-- Hidden inputs for upload logic -->
+      <input type="file" id="fileInput" style="display: none;" onchange="handleFileInputChange(event)">
+      <!-- Defaults for drag-drop upload -->
+      <input type="hidden" id="replicasInput" value="5">
+      <input type="checkbox" id="compressionCheck" checked style="display:none">
+
+      <!-- Upload Status Container (Floating) -->
+      <div id="uploadStatus"></div>
+
+      <!-- Decentralized Filesystem Card -->
+      <div class="col-12 mb-4 fs-grow">
+        <div class="card" id="fsCard" ondragover="handleFileDragOver(event)" ondragleave="handleFileDragLeave(event)" ondrop="handleFileDrop(event)">
+          <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <span>📂 Decentralized Filesystem</span>
+            <div>
+              <i id="fsLoading" class="fas fa-sync fa-spin text-white me-2" style="display: none"></i>
+              <button class="btn btn-sm btn-light me-2" onclick="promptMkdir()"><i class="fas fa-folder-plus"></i> New Folder</button>
+              <button class="btn btn-sm btn-light" onclick="triggerFsUpload()"><i class="fas fa-upload"></i> Upload Here</button>
+            </div>
+          </div>
+          <div class="card-body bg-white">
+            <nav aria-label="breadcrumb">
+              <ol class="breadcrumb bg-light p-2 rounded" id="fsBreadcrumbs">
+                <li class="breadcrumb-item active" aria-current="page">/</li>
+              </ol>
+            </nav>
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width: 40px"></th>
+                    <th>Name</th>
+                    <th style="width: 100px">Type</th>
+                    <th style="width: 100px">Size</th>
+                    <th style="width: 150px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="fsFileList">
+                  <tr>
+                    <td colspan="5" class="text-center text-muted">Loading filesystem...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card-footer text-muted small">
+              Drag and drop files to move them to subfolders. Drop a local file to upload it here.
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal for Distribution Graph -->
+      <div class="modal fade" id="distModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">File Distribution Map</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div id="dist-graph" style="width: 100%; height: 500px; border: 1px solid #ddd"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="pt-3 mt-4 text-muted border-top">&copy; 2026 P2P Storage System</footer>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      function formatBytes(bytes, decimals = 2) {
+        if (!+bytes) return "0 Bytes";
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+      }
+
+      // --- Filesystem Logic ---
+      let currentFsPath = "/";
+
+      // Global variable to track distribution network instance
+      let distNetwork = null;
+
+      async function showDistributionGraph(identifier, isPublic = true) {
+        const modal = new bootstrap.Modal(document.getElementById("distModal"));
+        modal.show();
+
+        const graphContainer = document.getElementById("dist-graph");
+        // Clear and show loading state
+        graphContainer.innerHTML =
+          '<div class="d-flex justify-content-center align-items-center h-100 flex-column"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">Discovery in progress...</div></div>';
+
+        try {
+          // FS entries have an ID, which is the manifest hash. So we can use /api/manifests/id/{id}
+          // Note: In Filesystem view, we always identify files by ID (hash), so isPublic=true logic (using ID endpoint) is correct.
+          const url = `/api/manifests/id/${identifier}`;
+          
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Failed to load map data");
+          const manifest = await res.json();
+
+          // Clear loading spinner
+          graphContainer.innerHTML = "";
+
+          const nodes = [];
+          const edges = [];
+          const ids = new Set();
+          
+          const sortedChunks = manifest.chunks.sort((a, b) => a.index - b.index);
+
+          // Collect all unique Hosts first to create specific nodes
+          const hostSet = new Set();
+          sortedChunks.forEach((c) => {
+            (c.locations || []).forEach((loc) => hostSet.add(loc));
+          });
+
+          // Add Hosts as Nodes
+          hostSet.forEach((loc) => {
+            const label = loc.split(":").pop();
+            nodes.push({
+              id: loc,
+              label: label,
+              color: "#4CAF50",
+              size: 25,
+              shape: "ellipse",
+            });
+            ids.add(loc);
+          });
+
+          // Add Start Node (Source)
+          nodes.push({ id: "SOURCE", label: "START", color: "#FF9800", size: 30, shape: "database" });
+          ids.add("SOURCE");
+
+          // Build edges based on sequence: SOURCE -> Chunks(0) -> Chunks(1) ...
+          let prevHosts = ["SOURCE"];
+
+          sortedChunks.forEach((chunk, idx) => {
+            const chunkLabel = `C${chunk.index}`;
+            const currentHosts = chunk.locations || [];
+
+            if (currentHosts.length > 0) {
+              const uniqueCurr = [...new Set(currentHosts)];
+
+              if (prevHosts.length > 0) {
+                uniqueCurr.forEach((curr, currIdx) => {
+                  let prev = prevHosts[currIdx % prevHosts.length];
+                  edges.push({
+                    from: prev,
+                    to: curr,
+                    label: chunkLabel,
+                    arrows: "to",
+                    color: "#2196F3",
+                    font: { align: "horizontal", size: 10, background: "white" },
+                  });
+                });
+              }
+              prevHosts = uniqueCurr;
+            } else {
+              prevHosts = [];
+            }
+          });
+
+          const container = document.getElementById("dist-graph");
+          const data = { nodes: nodes, edges: edges };
+
+          const options = {
+            layout: {
+              improvedLayout: true,
+              randomSeed: 2, 
+            },
+            physics: {
+              enabled: true,
+              solver: "barnesHut",
+              barnesHut: {
+                gravitationalConstant: -2000,
+                centralGravity: 0.3,
+                springLength: 200,
+                springConstant: 0.04,
+                damping: 0.09,
+                avoidOverlap: 0.5,
+              },
+              stabilization: {
+                iterations: 1000,
+              },
+            },
+            edges: {
+              smooth: {
+                type: "continuous",
+              },
+            },
+          };
+
+          // Wait for modal and destroy previous
+          setTimeout(() => {
+            if (distNetwork) distNetwork.destroy();
+            distNetwork = new vis.Network(container, data, options);
+          }, 500);
+        } catch (e) {
+          document.getElementById("dist-graph").innerText = "Error loading map: " + e;
+        }
+      }
+
+      // Init
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("Initializing Filesystem...");
+        loadFilesystem("/")
+          .then(() => console.log("Filesystem loaded"))
+          .catch((e) => console.error("FS Load Error:", e));
+      });
+
+      async function loadFilesystem(path = "/") {
+        currentFsPath = path;
+        renderBreadcrumbs(path);
+
+        const tbody = document.getElementById("fsFileList");
+        if (document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "inline-block";
+
+        try {
+          const res = await fetch(`/api/fs/ls?path=${encodeURIComponent(path)}`);
+          const data = await res.json();
+
+          tbody.innerHTML = "";
+
+          if (data.path !== "/") {
+            const parentPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
+            const tr = document.createElement("tr");
+            
+            // Allow dropping on parent folder ".."
+            tr.setAttribute("ondragover", "handleDragOver(event)");
+            tr.setAttribute("ondrop", "handleDrop(event, '..')");
+            tr.setAttribute("ondragleave", "handleDragLeave(event)");
+
+            tr.innerHTML = `
+                 <td><i class="fas fa-folder-open text-warning fa-lg"></i></td>
+                 <td><a href="#" onclick="loadFilesystem('${parentPath}'); return false;" class="text-decoration-none text-dark fw-bold">..</a></td>
+                 <td>Dir</td>
+                 <td>-</td>
+                 <td></td>
+               `;
+            tbody.appendChild(tr);
+          }
+
+          if (data.entries && data.entries.length > 0) {
+            data.entries.sort((a, b) => {
+              if (a.type === b.type) return a.name.localeCompare(b.name);
+              return a.type === "directory" ? -1 : 1;
+            });
+
+            data.entries.forEach((entry) => {
+              const tr = document.createElement("tr");
+              const icon = entry.type === "directory" ? "fa-folder text-warning" : "fa-file-alt text-secondary";
+
+              // Drag and Drop attributes
+              tr.setAttribute("draggable", "true");
+              tr.setAttribute("ondragstart", `handleDragStart(event, '${entry.name}', '${entry.type}')`);
+              
+              // If directory, it can accept drops
+              if (entry.type === "directory") {
+                  tr.setAttribute("ondragover", "handleDragOver(event)");
+                  tr.setAttribute("ondrop", `handleDrop(event, '${entry.name}')`);
+                  tr.setAttribute("ondragleave", "handleDragLeave(event)");
+              }
+
+              let nameLink = entry.name;
+              if (entry.type === "directory") {
+                const nextPath = path === "/" ? `/${entry.name}` : `${path}/${entry.name}`;
+                nameLink = `<a href="#" onclick="loadFilesystem('${nextPath}'); return false;" class="fw-bold text-decoration-none text-dark">${entry.name}</a>`;
+              }
+
+              tr.innerHTML = `
+                     <td><i class="fas ${icon} fa-lg"></i></td>
+                     <td>${nameLink}</td>
+                     <td>${entry.type}</td>
+                     <td>${entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
+                     <td>
+                        <div class="btn-group">
+                        ${
+                          entry.type === "file"
+                            ? `<button class="btn btn-sm btn-outline-primary" onclick="window.location.href='/api/stream_id/${entry.id}'"><i class="fas fa-download"></i></button>`
+                            : ""
+                        }
+                        ${
+                          entry.type === "file"
+                            ? `<button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${entry.id}')" title="Chunk Map"><i class="fas fa-project-diagram"></i></button>`
+                            : ""
+                        }
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteFsEntry('${entry.name}')"><i class="fas fa-trash"></i></button>
+                        </div>
+                     </td>
+                   `;
+              tbody.appendChild(tr);
+            });
+          } else {
+            if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Empty directory</td></tr>';
+          }
+        } catch (e) {
+          console.error(e);
+          tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${e}</td></tr>`;
+        } finally {
+          if (document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "none";
+        }
+      }
+
+      function renderBreadcrumbs(path) {
+        const nav = document.getElementById("fsBreadcrumbs");
+        nav.innerHTML = "";
+
+        const parts = path.split("/").filter((p) => p);
+
+        const rootLi = document.createElement("li");
+        rootLi.className = "breadcrumb-item";
+        if (parts.length === 0) {
+          rootLi.classList.add("active");
+          rootLi.innerText = "Root";
+        } else {
+          rootLi.innerHTML = `<a href="#" onclick="loadFilesystem('/'); return false;">Root</a>`;
+        }
+        nav.appendChild(rootLi);
+
+        let accum = "";
+        parts.forEach((part, idx) => {
+          accum += "/" + part;
+          accum = accum.replace("//", "/");
+
+          const li = document.createElement("li");
+          li.className = "breadcrumb-item";
+          if (idx === parts.length - 1) {
+            li.classList.add("active");
+            li.innerText = part;
+          } else {
+            li.innerHTML = `<a href="#" onclick="loadFilesystem('${accum}'); return false;">${part}</a>`;
+          }
+          nav.appendChild(li);
+        });
+      }
+
+      async function deleteFsEntry(name) {
+        if (!confirm(`Are you sure you want to delete '${name}'?`)) return;
+
+        try {
+          const res = await fetch("/api/fs/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: currentFsPath,
+              name: name,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            loadFilesystem(currentFsPath);
+          } else {
+            alert("Error: " + (result.error || result.message));
+          }
+        } catch (e) {
+          alert("Error: " + e);
+        }
+      }
+
+      async function promptMkdir() {
+        const name = prompt("Enter folder name:");
+        if (!name) return;
+
+        try {
+          const res = await fetch("/api/fs/mkdir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: currentFsPath,
+              name: name,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            loadFilesystem(currentFsPath);
+          } else {
+            alert("Error: " + result.error);
+          }
+        } catch (e) {
+          alert("Error: " + e);
+        }
+      }
+
+      function triggerFsUpload() {
+        const input = document.getElementById("fileInput");
+        input.click();
+      }
+
+      function handleFileInputChange(event) {
+          const file = event.target.files[0];
+          if(file) {
+              uploadFileDirectly(file);
+          }
+           // Reset input so same file can be selected again if needed
+           event.target.value = '';
+      }
+
+      async function addFileToFs(manifestId, filename, size, targetPath = null) {
+        const path = targetPath || currentFsPath;
+        try {
+          const res = await fetch("/api/fs/add_file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: path,
+              name: filename,
+              id: manifestId,
+              size: size,
+            }),
+          });
+          const result = await res.json();
+          if (res.ok) {
+            if (path === currentFsPath) loadFilesystem(currentFsPath);
+          } else {
+            console.warn("Error adding to filesystem: " + result.error);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // --- Drag and Drop Logic ---
+
+      function handleDragStart(ev, name, type) {
+          ev.stopPropagation();
+          ev.dataTransfer.setData("text/plain", JSON.stringify({name: name, type: type, srcPath: currentFsPath}));
+          ev.dataTransfer.effectAllowed = "move";
+      }
+
+      function handleDragOver(ev) {
+          ev.preventDefault();
+          ev.stopPropagation(); // Stop bubbling to card
+          ev.dataTransfer.dropEffect = "move";
+          ev.currentTarget.classList.add("table-active");
+      }
+      
+      function handleDragLeave(ev) {
+          ev.currentTarget.classList.remove("table-active");
+      }
+
+      async function handleDrop(ev, destName) {
+          ev.preventDefault();
+          ev.stopPropagation(); // Stop bubbling to card
+          ev.currentTarget.classList.remove("table-active");
+          
+          const rawData = ev.dataTransfer.getData("text/plain");
+          if (!rawData) return;
+          
+          try {
+              const data = JSON.parse(rawData);
+              const sourceName = data.name;
+              
+              if (sourceName === destName) return; 
+
+              let destPath = currentFsPath;
+              if (destName === '..') {
+                  destPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
+              } else {
+                  destPath = (currentFsPath === "/" ? "" : currentFsPath) + "/" + destName;
+              }
+
+              const confirmMove = confirm(`Move '${sourceName}' to '${destName}'?`);
+              if (!confirmMove) return;
+
+              const payload = {
+                  source_path: currentFsPath,
+                  source_name: sourceName,
+                  dest_path: destPath
+              };
+
+              const res = await fetch("/api/fs/move", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+              });
+              
+              const result = await res.json();
+              if (res.ok) {
+                  loadFilesystem(currentFsPath);
+              } else {
+                  alert("Move failed: " + (result.error || "Unknown error"));
+              }
+              
+          } catch (e) {
+              console.error("Drop error", e);
+          }
+      }
+
+      // External File Drop (Upload)
+      function handleFileDragOver(ev) {
+          ev.preventDefault();
+          ev.dataTransfer.dropEffect = "copy";
+          document.getElementById('fsCard').classList.add('border-primary', 'border-3');
+      }
+
+      function handleFileDragLeave(ev) {
+          document.getElementById('fsCard').classList.remove('border-primary', 'border-3');
+      }
+
+      function handleFileDrop(ev) {
+          ev.preventDefault();
+          document.getElementById('fsCard').classList.remove('border-primary', 'border-3');
+          
+          if (ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
+              const file = ev.dataTransfer.files[0]; // Support single file for now
+              if(confirm(`Upload '${file.name}' to current folder?`)) {
+                  uploadFileDirectly(file);
+              }
+          }
+      }
+
+      function uploadFileDirectly(file) {
+          const replicas = document.getElementById("replicasInput").value || 5;
+          const compression = document.getElementById("compressionCheck").checked;
+          const targetFsPath = currentFsPath;
+
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("redundancy", replicas);
+          formData.append("compression", compression);
+
+          const statusDiv = document.getElementById("uploadStatus");
+          statusDiv.className = "active"; // Show container
+          statusDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="small">Uploading ${file.name}</strong>
+                <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
+            </div>
+            <div class="progress mb-2" style="height: 15px;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <div id="statusText" class="text-muted small" style="font-size: 0.8em">Starting...</div>
+          `;
+          
+          // No scroll needed for floating element
+          // statusDiv.scrollIntoView({behavior: "smooth"});
+
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/upload", true);
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const percent = Math.round((event.loaded / event.total) * 100);
+              const progressBar = document.getElementById("progressBar");
+              const visualPercent = Math.round(percent * 0.4);
+
+              if (progressBar) {
+                progressBar.style.width = visualPercent + "%";
+                progressBar.innerText = visualPercent + "%";
+              }
+            }
+          };
+
+          xhr.onload = () => {
+             if (xhr.status === 200) {
+                 const result = JSON.parse(xhr.responseText);
+                 if (result.status === "processing" && result.task_id) {
+                     const taskId = result.task_id;
+                     const progressBar = document.getElementById("progressBar");
+                     const statusText = document.getElementById("statusText");
+                     
+                     if(progressBar) progressBar.classList.add("bg-success");
+
+                     const pollInterval = setInterval(async () => {
+                         const res = await fetch(`/api/progress/${taskId}`);
+                         const task = await res.json();
+                         
+                         if(task.status === "completed") {
+                             clearInterval(pollInterval);
+                             if(progressBar) {
+                                 progressBar.style.width="100%";
+                                 progressBar.innerText="100%";
+                             }
+                             if(statusText) statusText.innerText = task.message;
+                             
+                             const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
+                             if (match && match[1]) {
+                                 statusDiv.innerHTML = `
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <strong class="text-success">Upload Complete!</strong>
+                                        <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
+                                    </div>
+                                    <div class="alert alert-success fs-6 p-2 mb-0">ID: ${match[1].substring(0, 16)}...</div>
+                                  `;
+                                 addFileToFs(match[1], file.name, file.size, targetFsPath);
+                             }
+                             
+                             setTimeout(() => {
+                                statusDiv.classList.remove('active');
+                             }, 3000);
+                             
+                         } else if (task.status === "error") {
+                             clearInterval(pollInterval);
+                             statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2">${task.message}</div><button class="btn btn-sm btn-light mt-2 w-100" onclick="document.getElementById('uploadStatus').classList.remove('active')">Close</button>`;
+                         } else {
+                            if (progressBar) {
+                               let p = task.percent;
+                               let visualP = 40 + Math.round(p * 0.6);
+                               progressBar.style.width = visualP + "%";
+                               progressBar.innerText = visualP + "%";
+                            }
+                         }
+                     }, 500);
+                 }
+             }
+          };
+          xhr.send(formData);
+      }
+    </script>
+  </body>
+</html>

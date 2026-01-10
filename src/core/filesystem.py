@@ -211,3 +211,41 @@ class FilesystemManager:
         node.add_entry(next_part, "directory", new_child_id, 0)
 
         return await storer(node)
+
+    async def move_path(self, root_id: Optional[str], src_path: str, src_name: str,
+                        dest_path: str, dest_name: str,
+                        fetch_node_fn: Callable[[str], Awaitable[Optional[str]]],
+                        store_node_fn: Callable[[DirectoryNode], Awaitable[str]]) -> str:
+        """
+        Moves an entry from source to destination.
+        Returns the new Root ID.
+        """
+        # 1. Resolve source parent to get the entry metadata
+        parent_id = await self.resolve_path(root_id, src_path, fetch_node_fn)
+        if not parent_id:
+            raise ValueError(f"Source path not found: {src_path}")
+        
+        parent_content = await fetch_node_fn(parent_id)
+        if not parent_content:
+            raise ValueError("Source parent node content missing")
+            
+        parent_node = self.load_directory(parent_content)
+        if src_name not in parent_node.entries:
+            raise ValueError(f"Source file not found: {src_name}")
+            
+        entry_data = parent_node.entries[src_name]
+        
+        # 2. Delete from source (create intermediate tree)
+        intermediate_root = await self.delete_path(root_id, src_path, src_name, fetch_node_fn, store_node_fn)
+        
+        # 3. Add to destination (on the intermediate tree)
+        # Note: We reuse the same ID, effectively moving the pointer
+        new_entry_data = {
+            "type": entry_data["type"],
+            "id": entry_data["id"],
+            "size": entry_data.get("size", 0)
+        }
+        
+        final_root = await self.update_path(intermediate_root, dest_path, dest_name, new_entry_data, fetch_node_fn, store_node_fn)
+        
+        return final_root

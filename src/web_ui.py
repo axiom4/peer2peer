@@ -56,6 +56,16 @@ async def handle_index(request):
     return web.FileResponse(path)
 
 
+async def handle_filesystem(request):
+    path = os.path.join(os.path.dirname(__file__), 'web/filesystem.html')
+    return web.FileResponse(path)
+
+
+async def handle_topology(request):
+    path = os.path.join(os.path.dirname(__file__), 'web/topology.html')
+    return web.FileResponse(path)
+
+
 async def get_progress(request):
     task_id = request.match_info['task_id']
     task = TASKS.get(task_id)
@@ -1260,6 +1270,55 @@ async def handle_fs_delete(request):
         return web.json_response({"error": str(e)}, status=500)
 
 
+async def handle_fs_move(request):
+    """
+    POST /api/fs/move
+    { "source_path": "/", "source_name": "foo.txt", "dest_path": "/new_folder", "dest_name": "bar.txt" (optional) }
+    """
+    try:
+        data = await request.json()
+    except:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    
+    source_path = data.get("source_path", "/")
+    source_name = data.get("source_name")
+    dest_path = data.get("dest_path", "/")
+    # Use source name if dest_name not provided (move without rename)
+    dest_name = data.get("dest_name") or source_name
+
+    if not source_name:
+        return web.json_response({"error": "source_name required"}, status=400)
+
+    # Basic cycle check: if destination path starts with source path/name
+    # Construct full source path
+    full_src = (source_path.rstrip('/') + '/' + source_name).lstrip('/')
+    full_dest = dest_path.lstrip('/')
+    
+    # Simple strings check for cycles (moving dir into itself)
+    if full_dest.startswith(full_src):
+        return web.json_response({"error": "Cannot move directory into itself"}, status=400)
+
+    try:
+        root_id = await fs_get_root_id()
+        
+        new_root_id = await FS_MANAGER.move_path(
+            root_id,
+            source_path,
+            source_name,
+            dest_path,
+            dest_name,
+            fs_fetch_node_fn,
+            fs_store_node_fn
+        )
+        
+        await fs_set_root_id(new_root_id)
+        
+        return web.json_response({"status": "ok"})
+    except Exception as e:
+        print(f"Error moving FS entry: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
     os.makedirs('downloads', exist_ok=True)
@@ -1297,6 +1356,8 @@ def start_web_server(port=8888):
 
     app.add_routes([
         web.get('/', handle_index),
+        web.get('/filesystem', handle_filesystem),
+        web.get('/topology', handle_topology),
         web.get('/api/manifests', list_manifests),
         web.get('/api/manifests/{name}', get_manifest_detail),
         web.get('/api/manifests/id/{id}', get_manifest_by_id),
@@ -1314,6 +1375,7 @@ def start_web_server(port=8888):
         web.post('/api/fs/mkdir', handle_fs_mkdir),
         web.post('/api/fs/add_file', handle_fs_add_file),
         web.post('/api/fs/delete', handle_fs_delete),
+        web.post('/api/fs/move', handle_fs_move),
         web.static('/downloads', 'downloads'),
     ])
     print(f"Web UI available at http://localhost:{port}")
