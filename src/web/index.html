@@ -228,7 +228,7 @@
           if (res.ok) {
             // alert(result.message);
             loadManifests(); // Refresh list
-            loadCatalog();   // Refresh public catalog as well
+            loadCatalog(); // Refresh public catalog as well
           } else {
             alert("Error: " + (result.error || result.message));
           }
@@ -516,7 +516,9 @@
                     <td><code class="user-select-all small">${item.id}</code></td>
                     <td>${formatBytes(item.size || 0)}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${item.id}', true)" title="View Map"><i class="fas fa-project-diagram"></i></button>
+                        <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${
+                          item.id
+                        }', true)" title="View Map"><i class="fas fa-project-diagram"></i></button>
                         <button class="btn btn-sm btn-primary" onclick="window.location.href='/api/stream_id/${item.id}'" title="Download"><i class="fas fa-download"></i></button>
                         <button class="btn btn-sm btn-outline-danger" onclick="deleteManifest('${item.id}')" title="Delete from Network"><i class="fas fa-trash"></i></button>
                     </td>

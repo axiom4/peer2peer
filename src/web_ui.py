@@ -460,10 +460,11 @@ async def get_manifest_detail(request):
 
 async def delete_manifest(request):
     name = request.match_info['name']
-    
+
     # Check if input is a Manifest ID (64 char hex)
-    is_id = len(name) == 64 and all(c in '0123456789abcdefABCDEF' for c in name)
-    
+    is_id = len(name) == 64 and all(
+        c in '0123456789abcdefABCDEF' for c in name)
+
     # 1. Discover Peers
     # Use a stronger discovery method (Scan + Crawl)
     found_peers = await scan_network(timeout=3.0)
@@ -471,7 +472,7 @@ async def delete_manifest(request):
     # Crawl to find more peers
     visited = set(found_peers)
     queue = list(found_peers)
-    
+
     if queue:
         print(f"Delete: Initial scan found {len(queue)} peers. Crawling...")
         async with aiohttp.ClientSession() as session:
@@ -494,7 +495,7 @@ async def delete_manifest(request):
 
     final_peers = list(visited)
     print(f"Delete: Target peers count: {len(final_peers)}")
-    
+
     chunks_to_delete = []
     manifest_id_to_delete = None
 
@@ -502,7 +503,7 @@ async def delete_manifest(request):
     if is_id:
         manifest_id_to_delete = name
         print(f"Delete: Resolving manifest ID {name} from network...")
-        
+
         # Try to fetch manifest content to identify chunks
         manifest_data = None
         if final_peers:
@@ -517,16 +518,18 @@ async def delete_manifest(request):
                                 break
                     except:
                         continue
-        
+
         if manifest_data:
             try:
                 data = json.loads(manifest_data)
                 chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-                print(f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
+                print(
+                    f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
             except Exception as e:
                 print(f"Delete: Failed to parse manifest JSON: {e}")
         else:
-             print("Delete: Warning - Manifest content not found on network. Only deleting ID.")
+            print(
+                "Delete: Warning - Manifest content not found on network. Only deleting ID.")
 
     else:
         # Legacy File Mode
@@ -535,13 +538,13 @@ async def delete_manifest(request):
 
         manifest_path = os.path.join('manifests', name)
         if not os.path.exists(manifest_path):
-             return web.json_response({"error": "Manifest not found (locally) and not a valid ID"}, status=404)
+            return web.json_response({"error": "Manifest not found (locally) and not a valid ID"}, status=404)
 
         try:
             with open(manifest_path, 'r') as f:
                 data = json.load(f)
                 chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-            
+
             # Delete local file
             os.remove(manifest_path)
         except Exception as e:
@@ -551,7 +554,7 @@ async def delete_manifest(request):
     if final_peers and (chunks_to_delete or manifest_id_to_delete):
         async with aiohttp.ClientSession() as session:
             tasks = []
-            
+
             # Delete Content Chunks
             for chunk_id in chunks_to_delete:
                 for peer in final_peers:
@@ -561,7 +564,8 @@ async def delete_manifest(request):
             # Delete Manifest Chunk (if ID mode)
             if manifest_id_to_delete:
                 for peer in final_peers:
-                    tasks.append(session.delete(f"{peer}/chunk/{manifest_id_to_delete}"))
+                    tasks.append(session.delete(
+                        f"{peer}/chunk/{manifest_id_to_delete}"))
 
             if tasks:
                 print(f"Delete: Broadcasting {len(tasks)} delete requests...")
@@ -571,17 +575,17 @@ async def delete_manifest(request):
     if is_id or manifest_id_to_delete:
         target_id = manifest_id_to_delete if manifest_id_to_delete else name
         try:
-             # We need active remote nodes for DHT operation
-             # Reuse found_peers (URLs) converted to RemoteHttpNode
-             if final_peers:
-                 from src.network.remote_node import RemoteHttpNode
-                 # Quick wrapper
-                 dht_nodes = [RemoteHttpNode(url) for url in final_peers]
-                 
-                 cat = CatalogClient()
-                 await cat.delete(target_id, dht_nodes)
+            # We need active remote nodes for DHT operation
+            # Reuse found_peers (URLs) converted to RemoteHttpNode
+            if final_peers:
+                from src.network.remote_node import RemoteHttpNode
+                # Quick wrapper
+                dht_nodes = [RemoteHttpNode(url) for url in final_peers]
+
+                cat = CatalogClient()
+                await cat.delete(target_id, dht_nodes)
         except Exception as e:
-             print(f"Delete: Failed to remove from DHT Catalog: {e}")
+            print(f"Delete: Failed to remove from DHT Catalog: {e}")
 
     return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested deletion of {len(chunks_to_delete)} chunks."})
 
@@ -682,7 +686,7 @@ async def stream_download_by_id(request):
         # Handle "Chunk not found" specifically
         error_msg = str(e)
         if "not found on network" in error_msg:
-             return web.Response(status=404, text=f"Not Found: {error_msg}")
+            return web.Response(status=404, text=f"Not Found: {error_msg}")
         return web.Response(status=500, text=f"Internal Error: {error_msg}")
     except Exception as e:
         return web.Response(status=500, text=f"Internal Error: {e}")
@@ -753,9 +757,10 @@ async def get_manifest_by_id(request):
         # If active_peers list is empty or small, retrieve_chunk might fail fast.
         # Ensure we have a valid distributor even if peers are few.
         if not nodes:
-             # Last resort fallback
-             nodes = [RemoteHttpNode(f"http://127.0.0.1:{8000+i}") for i in range(5)]
-             distributor = DistributionStrategy(nodes)
+            # Last resort fallback
+            nodes = [RemoteHttpNode(
+                f"http://127.0.0.1:{8000+i}") for i in range(5)]
+            distributor = DistributionStrategy(nodes)
 
         manifest_data_bytes = await asyncio.get_event_loop().run_in_executor(
             None, lambda: distributor.retrieve_chunk(manifest_id)

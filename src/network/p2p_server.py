@@ -98,7 +98,7 @@ class P2PServer:
         try:
             data = await request.json()
             # Value is optional for generic delete, but required for Catalog list item removal
-            val = data.get('value', '') 
+            val = data.get('value', '')
             resp = self.dht.handle_delete(
                 data['key'], val, data['sender'])
             return web.json_response(resp)

@@ -149,7 +149,7 @@ class DHT:
         self.routing_table = RoutingTable(self.node_id)
         # chunk_id -> provider_url (Indexing)
         self.storage: Dict[str, str] = {}
-        
+
         # Re-enable Disk Persistence but with TTL logic handled in logic
         self.db_path = os.path.join(storage_dir, "dht_index.json")
         self._load_db()
@@ -228,14 +228,15 @@ class DHT:
                         obj = json.loads(item)
                         # TTL: 24 hours (86400 seconds)
                         if now - obj.get('ts', 0) < 86400:
-                             valid_items.append(item)
+                            valid_items.append(item)
                     except:
-                        valid_items.append(item) # Keep untimestamped legacy items
-                
+                        # Keep untimestamped legacy items
+                        valid_items.append(item)
+
                 # Check for updates
                 if len(valid_items) != len(items):
                     self.storage[key_hex] = valid_items
-                    self._save_db() # Sync cleanup to disk
+                    self._save_db()  # Sync cleanup to disk
 
         # If we have the value (location of chunk), return it
         if key_hex in self.storage:
@@ -289,7 +290,7 @@ class DHT:
                         return None
 
                 original_len = len(self.storage[key_hex])
-                
+
                 # Determine Target ID
                 target_id = None
                 try:
@@ -300,23 +301,24 @@ class DHT:
                     # Treat value as the ID itself if not valid JSON
                     target_id = value
 
-                print(f"DHT DELETE REQUEST [{self.port}]: Key={key_hex[:8]}... TargetID={target_id}")
+                print(
+                    f"DHT DELETE REQUEST [{self.port}]: Key={key_hex[:8]}... TargetID={target_id}")
 
                 if target_id:
-                     # Filter: Keep items where ID does NOT match AND full string does NOT match
-                     new_list = []
-                     for item in self.storage[key_hex]:
-                         item_id = get_id_safe(item)
-                         # Logic: Remove if ID matches OR if exact string matches
-                         if item_id == target_id:
-                             print(f"  -> Removing item by ID: {item[:50]}...")
-                             continue
-                         if item == value:
-                             print(f"  -> Removing item by String Match")
-                             continue
-                         new_list.append(item)
-                     
-                     self.storage[key_hex] = new_list
+                    # Filter: Keep items where ID does NOT match AND full string does NOT match
+                    new_list = []
+                    for item in self.storage[key_hex]:
+                        item_id = get_id_safe(item)
+                        # Logic: Remove if ID matches OR if exact string matches
+                        if item_id == target_id:
+                            print(f"  -> Removing item by ID: {item[:50]}...")
+                            continue
+                        if item == value:
+                            print(f"  -> Removing item by String Match")
+                            continue
+                        new_list.append(item)
+
+                    self.storage[key_hex] = new_list
                 else:
                     # Strict removal if no ID could be discerned
                     if value in self.storage[key_hex]:
@@ -325,19 +327,20 @@ class DHT:
 
                 if len(self.storage[key_hex]) != original_len:
                     self._save_db()
-                    print(f"  -> Catalog updated. Count: {len(self.storage[key_hex])}")
+                    print(
+                        f"  -> Catalog updated. Count: {len(self.storage[key_hex])}")
                     return {"status": "ok", "removed": True}
                 else:
                     print(f"  -> Item not found to remove.")
 
                 return {"status": "not_found", "removed": False}
-        
+
         # Standard Key Deletion
         if key_hex in self.storage:
-             del self.storage[key_hex]
-             self._save_db()
-             return {"status": "ok"}
-        
+            del self.storage[key_hex]
+            self._save_db()
+            return {"status": "ok"}
+
         return {"status": "not_found"}
 
     # Client Side Operations
