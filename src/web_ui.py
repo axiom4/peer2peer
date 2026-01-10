@@ -1173,7 +1173,7 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None):
     # 1. Discover Peers (If not provided)
     if peers is None:
         peers = await scan_network()
-    
+
     # Unique list
     final_peers = list(set(peers)) if peers else []
 
@@ -1389,7 +1389,7 @@ async def handle_fs_delete(request):
                 if not active_peers:
                     # Fallback scan
                     active_peers = await scan_network()
-                
+
                 # Limit concurrency to avoid overloading network/CPU
                 # Semaphore of 10 concurrent deletions
                 sem = asyncio.Semaphore(10)
@@ -1403,7 +1403,8 @@ async def handle_fs_delete(request):
                 pending = []
                 for mid, fname in manifests_to_delete:
                     # Fire and forget deletion for each file
-                    t = asyncio.create_task(delete_with_name_scan_optimized(mid, fname))
+                    t = asyncio.create_task(
+                        delete_with_name_scan_optimized(mid, fname))
                     pending.append(t)
 
                 for i, t in enumerate(asyncio.as_completed(pending)):
