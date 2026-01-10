@@ -411,6 +411,7 @@ The nodes communicate via a RESTful HTTP JSON API.
 ### P2P Protocol (`/`) - Inter-node
 
 - **Data Transfer**:
+
   - `PUT /chunk/{id}`: Store a binary chunk.
   - `GET /chunk/{id}`: Retrieve a binary chunk.
   - `DELETE /chunk/{id}`: Delete a chunk locally (no propagation).
