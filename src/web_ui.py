@@ -60,16 +60,17 @@ LAST_PEER_SCAN = 0
 PEER_SCAN_LOCK = asyncio.Lock()
 CACHE_TTL = 300  # 5 minutes
 
+
 async def get_active_peers():
     """Returns a list of cached peers or performs a scan if cache is stale."""
     global PEER_CACHE, LAST_PEER_SCAN
     import time
-    
+
     async with PEER_SCAN_LOCK:
         now = time.time()
         if PEER_CACHE and (now - LAST_PEER_SCAN < CACHE_TTL):
             return list(PEER_CACHE)
-        
+
         # Cache expired or empty, perform scan
         try:
             # Run scan in executor to avoid blocking if it was blocking (scan_network is async though)
@@ -152,7 +153,7 @@ async def upload_file(request):
             # Security fix: Ensure strictly flat filename, no directories
             if filename:
                 filename = os.path.basename(filename)
-            
+
             upload_dir = "uploads_temp"
             os.makedirs(upload_dir, exist_ok=True)
             temp_path = os.path.join(upload_dir, filename)
@@ -213,7 +214,8 @@ async def upload_file(request):
         try:
             await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
         except Exception as e:
-            print(f"[Upload Task {task_id}] Background distribution error: {e}")
+            print(
+                f"[Upload Task {task_id}] Background distribution error: {e}")
             import traceback
             traceback.print_exc()
             TASKS[task_id]["status"] = "error"
@@ -901,7 +903,7 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
     # Replicate to multiple nodes
     gateways = await get_dht_nodes(5)
     node_hash = node.get_hash()
-    
+
     # Update local cache immediately
     NODE_CACHE[node_hash] = node.to_json()
 
@@ -1070,7 +1072,7 @@ async def handle_fs_mkdir(request):
                 return web.json_response({"status": "ok", "path": full_path, "message": "exists"})
         except Exception:
             pass
-            
+
         # Create empty directory
         new_dir = DirectoryNode(new_dir_name)
         new_dir_id = await fs_store_node_fn(new_dir)
@@ -1312,10 +1314,12 @@ async def handle_fs_delete(request):
                             if entry["type"] == "file":
                                 manifests_to_delete.append(entry["id"])
                             elif entry["type"] == "directory":
-                                print(f"Delete: Recursive cleanup target detected: {name}")
+                                print(
+                                    f"Delete: Recursive cleanup target detected: {name}")
                                 collected = await _recursive_collect_manifests(entry["id"])
                                 manifests_to_delete.extend(collected)
-                                print(f"Delete: Found {len(collected)} nested files to remove contents for.")
+                                print(
+                                    f"Delete: Found {len(collected)} nested files to remove contents for.")
             except Exception as e:
                 print(f"Delete Pre-check Error: {e}")
 
@@ -1327,12 +1331,13 @@ async def handle_fs_delete(request):
                 fs_fetch_node_fn,
                 fs_store_node_fn
             )
-            
+
             await fs_set_root_id(new_root_id)
 
         # Post-Lock: Trigger network deletion for all identified file manifests
         if manifests_to_delete:
-            print(f"Delete: Triggering network cleanup for {len(manifests_to_delete)} files.")
+            print(
+                f"Delete: Triggering network cleanup for {len(manifests_to_delete)} files.")
             for mid in manifests_to_delete:
                 # Fire and forget deletion for each file
                 asyncio.create_task(_delete_file_from_network(
