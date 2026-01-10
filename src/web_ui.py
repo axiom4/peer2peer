@@ -655,7 +655,8 @@ async def delete_manifest(request):
                 cat = CatalogClient()
                 await cat.delete(target_id, dht_nodes)
         except Exception as e:
-            print(f"Delete: Failed to remove from DHT Catalog: {e}", flush=True)
+            print(
+                f"Delete: Failed to remove from DHT Catalog: {e}", flush=True)
 
     return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested deletion of {len(chunks_to_delete)} chunks."})
 

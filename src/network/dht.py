@@ -165,7 +165,7 @@ class DHT:
             except Exception as e:
                 logger.error(f"Failed to load DHT DB: {e}")
         else:
-             logger.warning(f"DHT DB not found at {self.db_path}")
+            logger.warning(f"DHT DB not found at {self.db_path}")
 
     def _save_db(self):
         try:
@@ -281,18 +281,21 @@ class DHT:
         return {"status": "ok"}
 
     def handle_delete(self, key_hex: str, value: str, sender_info: dict):
-        logger.info(f"DHT HANDLE DELETE ENTERED: Key='{key_hex}' Value='{value[:20]}'")
+        logger.info(
+            f"DHT HANDLE DELETE ENTERED: Key='{key_hex}' Value='{value[:20]}'")
         self.handle_ping(sender_info)
 
         # CATALOG FEATURE: List Remove
         if key_hex.startswith("catalog_"):
-            logger.info(f"DEBUG: Processing DELETE for catalog key {key_hex[:8]}... Value={value[:50]}")
+            logger.info(
+                f"DEBUG: Processing DELETE for catalog key {key_hex[:8]}... Value={value[:50]}")
             if key_hex in self.storage:
-                logger.info(f"DEBUG: Key found in storage. Count before: {len(self.storage[key_hex])}")
+                logger.info(
+                    f"DEBUG: Key found in storage. Count before: {len(self.storage[key_hex])}")
             else:
                 logger.info(f"DEBUG: Key {key_hex} NOT found in storage.")
                 # logger.info(f"DEBUG: Available keys: {list(self.storage.keys())}") # Use with caution if huge
-                
+
             if key_hex in self.storage and isinstance(self.storage[key_hex], list):
                 # Safe Parsing Helper
                 def get_id_safe(json_str):
@@ -321,20 +324,22 @@ class DHT:
                     # Filter: Keep items where ID does NOT match AND full string does NOT match
                     new_list = []
                     target_id_str = str(target_id).strip()
-                    
+
                     for item in self.storage[key_hex]:
                         item_id = get_id_safe(item)
-                        item_id_str = str(item_id).strip() if item_id is not None else "None"
-                        
+                        item_id_str = str(item_id).strip(
+                        ) if item_id is not None else "None"
+
                         # Logic: Remove if ID matches OR if exact string matches
-                        
+
                         if item_id_str == target_id_str:
-                             logger.info(f"  -> REMOVED item by ID match: {target_id_str} (Found: {item_id_str})")
-                             continue
+                            logger.info(
+                                f"  -> REMOVED item by ID match: {target_id_str} (Found: {item_id_str})")
+                            continue
                         if item == value:
                             logger.info(f"  -> REMOVED item by String match")
                             continue
-                        
+
                         # Debug logic for items that are kept to see why
                         # logger.info(f"  -> Keeping item: {item_id_str} != {target_id_str}")
                         new_list.append(item)
@@ -352,7 +357,8 @@ class DHT:
                         f"  -> Catalog updated. Count: {len(self.storage[key_hex])}")
                     return {"status": "ok", "removed": True}
                 else:
-                    logger.info(f"  -> Item not found to remove. (Original: {original_len}, New: {len(self.storage[key_hex])})")
+                    logger.info(
+                        f"  -> Item not found to remove. (Original: {original_len}, New: {len(self.storage[key_hex])})")
 
                 return {"status": "not_found", "removed": False}
 

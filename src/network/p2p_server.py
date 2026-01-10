@@ -108,13 +108,13 @@ class P2PServer:
 
             print(
                 f"DHT DELETE REQUEST received for key={key[:8]}... val={val[:20]}...")
-            
+
             # GOSSIP PROPAGATION
             # Create a unique ID for this delete request to dedup, include nonce if present
             nonce = data.get('nonce', '')
             import hashlib
             msg_id = hashlib.sha256(f"{key}{val}{nonce}".encode()).hexdigest()
-            
+
             if msg_id in self.seen_requests:
                 # Already processed, stop propagation
                 # print(f"  -> Skipping duplicate delete request {msg_id[:8]}")

@@ -348,9 +348,9 @@ class CatalogClient:
             "key": dht_key,
             "value": manifest_id,
             "sender": client_info,
-            "nonce": nonce # Allow retries
+            "nonce": nonce  # Allow retries
         }
-        
+
         # Payload 2: Remove ID key (if stored as KV)
         payload_kv = {
             "key": manifest_id,
@@ -363,7 +363,8 @@ class CatalogClient:
         import aiohttp
         async with aiohttp.ClientSession() as session:
             targets = distributor_nodes
-            print(f"Catalog Delete: Broadcasting to {len(targets)} nodes...", flush=True)
+            print(
+                f"Catalog Delete: Broadcasting to {len(targets)} nodes...", flush=True)
 
             tasks = []
             for node in targets:
@@ -375,7 +376,8 @@ class CatalogClient:
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for i, res in enumerate(results):
-                    url = targets[i // 2 if i < len(targets) * 2 else 0].url if i < len(targets) * 2 else "unknown"
+                    url = targets[i // 2 if i < len(targets) * 2 else 0].url if i < len(
+                        targets) * 2 else "unknown"
                     if isinstance(res, Exception):
                         print(f"❌ Delete failed for {url}: {res}")
                     elif res.status == 200:
@@ -384,8 +386,8 @@ class CatalogClient:
                             print(f"✅ Node {url} responded: {resp_json}")
                             success_count += 0.5
                         except:
-                             print(f"✅ Node {url} responded (non-json 200)")
-                             success_count += 0.5
+                            print(f"✅ Node {url} responded (non-json 200)")
+                            success_count += 0.5
                     else:
                         print(f"⚠️ Node {url} returned status {res.status}")
 
