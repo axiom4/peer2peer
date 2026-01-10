@@ -1279,7 +1279,7 @@ async def handle_fs_move(request):
         data = await request.json()
     except:
         return web.json_response({"error": "Invalid JSON"}, status=400)
-    
+
     source_path = data.get("source_path", "/")
     source_name = data.get("source_name")
     dest_path = data.get("dest_path", "/")
@@ -1293,14 +1293,14 @@ async def handle_fs_move(request):
     # Construct full source path
     full_src = (source_path.rstrip('/') + '/' + source_name).lstrip('/')
     full_dest = dest_path.lstrip('/')
-    
+
     # Simple strings check for cycles (moving dir into itself)
     if full_dest.startswith(full_src):
         return web.json_response({"error": "Cannot move directory into itself"}, status=400)
 
     try:
         root_id = await fs_get_root_id()
-        
+
         new_root_id = await FS_MANAGER.move_path(
             root_id,
             source_path,
@@ -1310,9 +1310,9 @@ async def handle_fs_move(request):
             fs_fetch_node_fn,
             fs_store_node_fn
         )
-        
+
         await fs_set_root_id(new_root_id)
-        
+
         return web.json_response({"status": "ok"})
     except Exception as e:
         print(f"Error moving FS entry: {e}")

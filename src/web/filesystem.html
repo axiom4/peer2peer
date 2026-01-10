@@ -9,7 +9,8 @@
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
       /* Full height layout */
-      html, body {
+      html,
+      body {
         height: 100%;
         margin: 0;
         overflow: hidden; /* Prevent body scroll */
@@ -18,7 +19,7 @@
         height: 100%;
         display: flex;
         flex-direction: column;
-        padding-bottom: 0px !important; 
+        padding-bottom: 0px !important;
       }
       /* Ensure the card wrapper grows to fill space */
       .fs-grow {
@@ -47,7 +48,7 @@
         background: white;
         padding: 15px;
         border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         display: none; /* Hidden by default */
         border: 1px solid #dee2e6;
       }
@@ -64,17 +65,17 @@
           <span class="fs-4">P2P Storage System</span>
         </a>
         <nav>
-            <a href="/" class="btn btn-outline-primary me-2">Dashboard</a>
-            <a href="/filesystem" class="btn btn-primary me-2">Filesystem</a>
-            <a href="/topology" class="btn btn-outline-primary">Network Topology</a>
+          <a href="/" class="btn btn-outline-primary me-2">Dashboard</a>
+          <a href="/filesystem" class="btn btn-primary me-2">Filesystem</a>
+          <a href="/topology" class="btn btn-outline-primary">Network Topology</a>
         </nav>
       </header>
 
       <!-- Hidden inputs for upload logic -->
-      <input type="file" id="fileInput" style="display: none;" onchange="handleFileInputChange(event)">
+      <input type="file" id="fileInput" style="display: none" onchange="handleFileInputChange(event)" />
       <!-- Defaults for drag-drop upload -->
-      <input type="hidden" id="replicasInput" value="5">
-      <input type="checkbox" id="compressionCheck" checked style="display:none">
+      <input type="hidden" id="replicasInput" value="5" />
+      <input type="checkbox" id="compressionCheck" checked style="display: none" />
 
       <!-- Upload Status Container (Floating) -->
       <div id="uploadStatus"></div>
@@ -115,9 +116,7 @@
               </table>
             </div>
           </div>
-          <div class="card-footer text-muted small">
-              Drag and drop files to move them to subfolders. Drop a local file to upload it here.
-          </div>
+          <div class="card-footer text-muted small">Drag and drop files to move them to subfolders. Drop a local file to upload it here.</div>
         </div>
       </div>
 
@@ -168,7 +167,7 @@
           // FS entries have an ID, which is the manifest hash. So we can use /api/manifests/id/{id}
           // Note: In Filesystem view, we always identify files by ID (hash), so isPublic=true logic (using ID endpoint) is correct.
           const url = `/api/manifests/id/${identifier}`;
-          
+
           const res = await fetch(url);
           if (!res.ok) throw new Error("Failed to load map data");
           const manifest = await res.json();
@@ -179,7 +178,7 @@
           const nodes = [];
           const edges = [];
           const ids = new Set();
-          
+
           const sortedChunks = manifest.chunks.sort((a, b) => a.index - b.index);
 
           // Collect all unique Hosts first to create specific nodes
@@ -240,7 +239,7 @@
           const options = {
             layout: {
               improvedLayout: true,
-              randomSeed: 2, 
+              randomSeed: 2,
             },
             physics: {
               enabled: true,
@@ -298,7 +297,7 @@
           if (data.path !== "/") {
             const parentPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
             const tr = document.createElement("tr");
-            
+
             // Allow dropping on parent folder ".."
             tr.setAttribute("ondragover", "handleDragOver(event)");
             tr.setAttribute("ondrop", "handleDrop(event, '..')");
@@ -327,12 +326,12 @@
               // Drag and Drop attributes
               tr.setAttribute("draggable", "true");
               tr.setAttribute("ondragstart", `handleDragStart(event, '${entry.name}', '${entry.type}')`);
-              
+
               // If directory, it can accept drops
               if (entry.type === "directory") {
-                  tr.setAttribute("ondragover", "handleDragOver(event)");
-                  tr.setAttribute("ondrop", `handleDrop(event, '${entry.name}')`);
-                  tr.setAttribute("ondragleave", "handleDragLeave(event)");
+                tr.setAttribute("ondragover", "handleDragOver(event)");
+                tr.setAttribute("ondrop", `handleDrop(event, '${entry.name}')`);
+                tr.setAttribute("ondragleave", "handleDragLeave(event)");
               }
 
               let nameLink = entry.name;
@@ -461,12 +460,12 @@
       }
 
       function handleFileInputChange(event) {
-          const file = event.target.files[0];
-          if(file) {
-              uploadFileDirectly(file);
-          }
-           // Reset input so same file can be selected again if needed
-           event.target.value = '';
+        const file = event.target.files[0];
+        if (file) {
+          uploadFileDirectly(file);
+        }
+        // Reset input so same file can be selected again if needed
+        event.target.value = "";
       }
 
       async function addFileToFs(manifestId, filename, size, targetPath = null) {
@@ -496,106 +495,105 @@
       // --- Drag and Drop Logic ---
 
       function handleDragStart(ev, name, type) {
-          ev.stopPropagation();
-          ev.dataTransfer.setData("text/plain", JSON.stringify({name: name, type: type, srcPath: currentFsPath}));
-          ev.dataTransfer.effectAllowed = "move";
+        ev.stopPropagation();
+        ev.dataTransfer.setData("text/plain", JSON.stringify({ name: name, type: type, srcPath: currentFsPath }));
+        ev.dataTransfer.effectAllowed = "move";
       }
 
       function handleDragOver(ev) {
-          ev.preventDefault();
-          ev.stopPropagation(); // Stop bubbling to card
-          ev.dataTransfer.dropEffect = "move";
-          ev.currentTarget.classList.add("table-active");
+        ev.preventDefault();
+        ev.stopPropagation(); // Stop bubbling to card
+        ev.dataTransfer.dropEffect = "move";
+        ev.currentTarget.classList.add("table-active");
       }
-      
+
       function handleDragLeave(ev) {
-          ev.currentTarget.classList.remove("table-active");
+        ev.currentTarget.classList.remove("table-active");
       }
 
       async function handleDrop(ev, destName) {
-          ev.preventDefault();
-          ev.stopPropagation(); // Stop bubbling to card
-          ev.currentTarget.classList.remove("table-active");
-          
-          const rawData = ev.dataTransfer.getData("text/plain");
-          if (!rawData) return;
-          
-          try {
-              const data = JSON.parse(rawData);
-              const sourceName = data.name;
-              
-              if (sourceName === destName) return; 
+        ev.preventDefault();
+        ev.stopPropagation(); // Stop bubbling to card
+        ev.currentTarget.classList.remove("table-active");
 
-              let destPath = currentFsPath;
-              if (destName === '..') {
-                  destPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
-              } else {
-                  destPath = (currentFsPath === "/" ? "" : currentFsPath) + "/" + destName;
-              }
+        const rawData = ev.dataTransfer.getData("text/plain");
+        if (!rawData) return;
 
-              const confirmMove = confirm(`Move '${sourceName}' to '${destName}'?`);
-              if (!confirmMove) return;
+        try {
+          const data = JSON.parse(rawData);
+          const sourceName = data.name;
 
-              const payload = {
-                  source_path: currentFsPath,
-                  source_name: sourceName,
-                  dest_path: destPath
-              };
+          if (sourceName === destName) return;
 
-              const res = await fetch("/api/fs/move", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payload)
-              });
-              
-              const result = await res.json();
-              if (res.ok) {
-                  loadFilesystem(currentFsPath);
-              } else {
-                  alert("Move failed: " + (result.error || "Unknown error"));
-              }
-              
-          } catch (e) {
-              console.error("Drop error", e);
+          let destPath = currentFsPath;
+          if (destName === "..") {
+            destPath = currentFsPath.substring(0, currentFsPath.lastIndexOf("/")) || "/";
+          } else {
+            destPath = (currentFsPath === "/" ? "" : currentFsPath) + "/" + destName;
           }
+
+          const confirmMove = confirm(`Move '${sourceName}' to '${destName}'?`);
+          if (!confirmMove) return;
+
+          const payload = {
+            source_path: currentFsPath,
+            source_name: sourceName,
+            dest_path: destPath,
+          };
+
+          const res = await fetch("/api/fs/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const result = await res.json();
+          if (res.ok) {
+            loadFilesystem(currentFsPath);
+          } else {
+            alert("Move failed: " + (result.error || "Unknown error"));
+          }
+        } catch (e) {
+          console.error("Drop error", e);
+        }
       }
 
       // External File Drop (Upload)
       function handleFileDragOver(ev) {
-          ev.preventDefault();
-          ev.dataTransfer.dropEffect = "copy";
-          document.getElementById('fsCard').classList.add('border-primary', 'border-3');
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "copy";
+        document.getElementById("fsCard").classList.add("border-primary", "border-3");
       }
 
       function handleFileDragLeave(ev) {
-          document.getElementById('fsCard').classList.remove('border-primary', 'border-3');
+        document.getElementById("fsCard").classList.remove("border-primary", "border-3");
       }
 
       function handleFileDrop(ev) {
-          ev.preventDefault();
-          document.getElementById('fsCard').classList.remove('border-primary', 'border-3');
-          
-          if (ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
-              const file = ev.dataTransfer.files[0]; // Support single file for now
-              if(confirm(`Upload '${file.name}' to current folder?`)) {
-                  uploadFileDirectly(file);
-              }
+        ev.preventDefault();
+        document.getElementById("fsCard").classList.remove("border-primary", "border-3");
+
+        if (ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
+          const file = ev.dataTransfer.files[0]; // Support single file for now
+          if (confirm(`Upload '${file.name}' to current folder?`)) {
+            uploadFileDirectly(file);
           }
+        }
       }
 
       function uploadFileDirectly(file) {
-          const replicas = document.getElementById("replicasInput").value || 5;
-          const compression = document.getElementById("compressionCheck").checked;
-          const targetFsPath = currentFsPath;
+        const replicas = document.getElementById("replicasInput").value || 5;
+        const compression = document.getElementById("compressionCheck").checked;
+        const targetFsPath = currentFsPath;
 
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append("redundancy", replicas);
-          formData.append("compression", compression);
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("redundancy", replicas);
+        formData.append("compression", compression);
 
-          const statusDiv = document.getElementById("uploadStatus");
-          statusDiv.className = "active"; // Show container
-          statusDiv.innerHTML = `
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.className = "active"; // Show container
+        statusDiv.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <strong class="small">Uploading ${file.name}</strong>
                 <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
@@ -605,80 +603,79 @@
             </div>
             <div id="statusText" class="text-muted small" style="font-size: 0.8em">Starting...</div>
           `;
-          
-          // No scroll needed for floating element
-          // statusDiv.scrollIntoView({behavior: "smooth"});
 
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", "/api/upload", true);
+        // No scroll needed for floating element
+        // statusDiv.scrollIntoView({behavior: "smooth"});
 
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const percent = Math.round((event.loaded / event.total) * 100);
-              const progressBar = document.getElementById("progressBar");
-              const visualPercent = Math.round(percent * 0.4);
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/upload", true);
 
-              if (progressBar) {
-                progressBar.style.width = visualPercent + "%";
-                progressBar.innerText = visualPercent + "%";
-              }
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            const progressBar = document.getElementById("progressBar");
+            const visualPercent = Math.round(percent * 0.4);
+
+            if (progressBar) {
+              progressBar.style.width = visualPercent + "%";
+              progressBar.innerText = visualPercent + "%";
             }
-          };
+          }
+        };
 
-          xhr.onload = () => {
-             if (xhr.status === 200) {
-                 const result = JSON.parse(xhr.responseText);
-                 if (result.status === "processing" && result.task_id) {
-                     const taskId = result.task_id;
-                     const progressBar = document.getElementById("progressBar");
-                     const statusText = document.getElementById("statusText");
-                     
-                     if(progressBar) progressBar.classList.add("bg-success");
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const result = JSON.parse(xhr.responseText);
+            if (result.status === "processing" && result.task_id) {
+              const taskId = result.task_id;
+              const progressBar = document.getElementById("progressBar");
+              const statusText = document.getElementById("statusText");
 
-                     const pollInterval = setInterval(async () => {
-                         const res = await fetch(`/api/progress/${taskId}`);
-                         const task = await res.json();
-                         
-                         if(task.status === "completed") {
-                             clearInterval(pollInterval);
-                             if(progressBar) {
-                                 progressBar.style.width="100%";
-                                 progressBar.innerText="100%";
-                             }
-                             if(statusText) statusText.innerText = task.message;
-                             
-                             const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
-                             if (match && match[1]) {
-                                 statusDiv.innerHTML = `
+              if (progressBar) progressBar.classList.add("bg-success");
+
+              const pollInterval = setInterval(async () => {
+                const res = await fetch(`/api/progress/${taskId}`);
+                const task = await res.json();
+
+                if (task.status === "completed") {
+                  clearInterval(pollInterval);
+                  if (progressBar) {
+                    progressBar.style.width = "100%";
+                    progressBar.innerText = "100%";
+                  }
+                  if (statusText) statusText.innerText = task.message;
+
+                  const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
+                  if (match && match[1]) {
+                    statusDiv.innerHTML = `
                                     <div class="d-flex justify-content-between align-items-center mb-2">
                                         <strong class="text-success">Upload Complete!</strong>
                                         <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
                                     </div>
                                     <div class="alert alert-success fs-6 p-2 mb-0">ID: ${match[1].substring(0, 16)}...</div>
                                   `;
-                                 addFileToFs(match[1], file.name, file.size, targetFsPath);
-                             }
-                             
-                             setTimeout(() => {
-                                statusDiv.classList.remove('active');
-                             }, 3000);
-                             
-                         } else if (task.status === "error") {
-                             clearInterval(pollInterval);
-                             statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2">${task.message}</div><button class="btn btn-sm btn-light mt-2 w-100" onclick="document.getElementById('uploadStatus').classList.remove('active')">Close</button>`;
-                         } else {
-                            if (progressBar) {
-                               let p = task.percent;
-                               let visualP = 40 + Math.round(p * 0.6);
-                               progressBar.style.width = visualP + "%";
-                               progressBar.innerText = visualP + "%";
-                            }
-                         }
-                     }, 500);
-                 }
-             }
-          };
-          xhr.send(formData);
+                    addFileToFs(match[1], file.name, file.size, targetFsPath);
+                  }
+
+                  setTimeout(() => {
+                    statusDiv.classList.remove("active");
+                  }, 3000);
+                } else if (task.status === "error") {
+                  clearInterval(pollInterval);
+                  statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2">${task.message}</div><button class="btn btn-sm btn-light mt-2 w-100" onclick="document.getElementById('uploadStatus').classList.remove('active')">Close</button>`;
+                } else {
+                  if (progressBar) {
+                    let p = task.percent;
+                    let visualP = 40 + Math.round(p * 0.6);
+                    progressBar.style.width = visualP + "%";
+                    progressBar.innerText = visualP + "%";
+                  }
+                }
+              }, 500);
+            }
+          }
+        };
+        xhr.send(formData);
       }
     </script>
   </body>

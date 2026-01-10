@@ -224,20 +224,20 @@ class FilesystemManager:
         parent_id = await self.resolve_path(root_id, src_path, fetch_node_fn)
         if not parent_id:
             raise ValueError(f"Source path not found: {src_path}")
-        
+
         parent_content = await fetch_node_fn(parent_id)
         if not parent_content:
             raise ValueError("Source parent node content missing")
-            
+
         parent_node = self.load_directory(parent_content)
         if src_name not in parent_node.entries:
             raise ValueError(f"Source file not found: {src_name}")
-            
+
         entry_data = parent_node.entries[src_name]
-        
+
         # 2. Delete from source (create intermediate tree)
         intermediate_root = await self.delete_path(root_id, src_path, src_name, fetch_node_fn, store_node_fn)
-        
+
         # 3. Add to destination (on the intermediate tree)
         # Note: We reuse the same ID, effectively moving the pointer
         new_entry_data = {
@@ -245,7 +245,7 @@ class FilesystemManager:
             "id": entry_data["id"],
             "size": entry_data.get("size", 0)
         }
-        
+
         final_root = await self.update_path(intermediate_root, dest_path, dest_name, new_entry_data, fetch_node_fn, store_node_fn)
-        
+
         return final_root
