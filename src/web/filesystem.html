@@ -57,17 +57,42 @@
         display: block;
       }
       /* Tree View Styles */
-      .tree-item { cursor: pointer; padding: 4px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .tree-item:hover { background-color: #e9ecef; }
-      .tree-item.active { background-color: #0d6efd; color: white !important; }
-      .tree-group { padding-left: 20px; display: none; }
-      .tree-group.show { display: block; }
-      .tree-toggle { cursor: pointer; width: 20px; display: inline-block; text-align: center; color: #6c757d; }
-      .tree-toggle:hover { color: #0d6efd; }
+      .tree-item {
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tree-item:hover {
+        background-color: #e9ecef;
+      }
+      .tree-item.active {
+        background-color: #0d6efd;
+        color: white !important;
+      }
+      .tree-group {
+        padding-left: 20px;
+        display: none;
+      }
+      .tree-group.show {
+        display: block;
+      }
+      .tree-toggle {
+        cursor: pointer;
+        width: 20px;
+        display: inline-block;
+        text-align: center;
+        color: #6c757d;
+      }
+      .tree-toggle:hover {
+        color: #0d6efd;
+      }
     </style>
   </head>
   <body class="bg-light">
-    <div class="container-fluid py-4 px-4 main-container" style="height: 100%; display: flex; flex-direction: column;">
+    <div class="container-fluid py-4 px-4 main-container" style="height: 100%; display: flex; flex-direction: column">
       <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center flex-shrink-0">
         <a href="/" class="d-flex align-items-center text-dark text-decoration-none">
           <span class="fs-4">P2P Storage System</span>
@@ -88,22 +113,20 @@
       <!-- Upload Status Container (Floating) -->
       <div id="uploadStatus"></div>
 
-      <div class="row g-4 mb-4 flex-grow-1" style="min-height: 0;">
+      <div class="row g-4 mb-4 flex-grow-1" style="min-height: 0">
         <!-- Left Column: Navigation Tree -->
         <div class="col-lg-3 d-flex flex-column h-100">
           <div class="card h-100 d-flex flex-column">
-             <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
-               <span>Allowed Folders</span>
-               <button class="btn btn-sm btn-outline-primary" onclick="promptMkdir()" title="New Folder"><i class="fas fa-folder-plus"></i></button>
-             </div>
-             <div class="card-body p-2" style="overflow-y: auto;">
-               <div id="fsTreeRoot">
-                 <!-- Tree will be injected here -->
-                 <div class="d-flex align-items-center tree-item" onclick="loadFilesystem('/')">
-                   <i class="fas fa-hdd text-secondary me-2"></i> Root
-                 </div>
-               </div>
-             </div>
+            <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
+              <span>Allowed Folders</span>
+              <button class="btn btn-sm btn-outline-primary" onclick="promptMkdir()" title="New Folder"><i class="fas fa-folder-plus"></i></button>
+            </div>
+            <div class="card-body p-2" style="overflow-y: auto">
+              <div id="fsTreeRoot">
+                <!-- Tree will be injected here -->
+                <div class="d-flex align-items-center tree-item" onclick="loadFilesystem('/')"><i class="fas fa-hdd text-secondary me-2"></i> Root</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -117,7 +140,7 @@
                 <button class="btn btn-sm btn-light" onclick="triggerFsUpload()"><i class="fas fa-upload"></i> Upload Here</button>
               </div>
             </div>
-            <div class="card-body bg-white d-flex flex-column p-0" style="min-height: 0;">
+            <div class="card-body bg-white d-flex flex-column p-0" style="min-height: 0">
               <nav aria-label="breadcrumb" class="p-3 pb-0">
                 <ol class="breadcrumb bg-light p-2 rounded mb-2" id="fsBreadcrumbs">
                   <li class="breadcrumb-item active" aria-current="page">/</li>
@@ -306,7 +329,7 @@
         loadFilesystem("/")
           .then(() => console.log("Filesystem loaded"))
           .catch((e) => console.error("FS Load Error:", e));
-        
+
         // Init Tree
         refreshTreeRoot();
       });
@@ -314,10 +337,10 @@
       // --- Tree Logic ---
       async function refreshTreeRoot() {
         const rootContainer = document.getElementById("fsTreeRoot");
-        rootContainer.innerHTML = '';
-        
+        rootContainer.innerHTML = "";
+
         // Creates the Root Node
-        const rootDiv = document.createElement('div');
+        const rootDiv = document.createElement("div");
         rootDiv.innerHTML = `
             <div class="d-flex align-items-center">
                 <span class="tree-toggle" onclick="toggleTreeNode(event, '/', this)"><i class="fas fa-chevron-right"></i></span>
@@ -328,52 +351,52 @@
             <div class="tree-group" id="group-root"></div>
         `;
         rootContainer.appendChild(rootDiv);
-        
+
         // Auto-expand root
-        const toggleBtn = rootDiv.querySelector('.tree-toggle');
-        toggleTreeNode(null, '/', toggleBtn); 
+        const toggleBtn = rootDiv.querySelector(".tree-toggle");
+        toggleTreeNode(null, "/", toggleBtn);
       }
 
       async function toggleTreeNode(ev, path, toggleEl) {
-          if(ev) ev.stopPropagation();
-          const group = toggleEl.parentElement.nextElementSibling; // The div.tree-group
-          const isExpanded = group.classList.contains('show');
-          
-          if (isExpanded) {
-              group.classList.remove('show');
-              toggleEl.innerHTML = '<i class="fas fa-chevron-right"></i>';
-          } else {
-              group.classList.add('show');
-              toggleEl.innerHTML = '<i class="fas fa-chevron-down"></i>';
-              if (group.children.length === 0) {
-                  // Lazy load
-                  await loadTreePath(path, group);
-              }
+        if (ev) ev.stopPropagation();
+        const group = toggleEl.parentElement.nextElementSibling; // The div.tree-group
+        const isExpanded = group.classList.contains("show");
+
+        if (isExpanded) {
+          group.classList.remove("show");
+          toggleEl.innerHTML = '<i class="fas fa-chevron-right"></i>';
+        } else {
+          group.classList.add("show");
+          toggleEl.innerHTML = '<i class="fas fa-chevron-down"></i>';
+          if (group.children.length === 0) {
+            // Lazy load
+            await loadTreePath(path, group);
           }
+        }
       }
 
       async function loadTreePath(path, container) {
-          container.innerHTML = '<div class="text-muted small ps-4">Loading...</div>';
-          try {
-              const res = await fetch(`/api/fs/ls?path=${encodeURIComponent(path)}`);
-              const data = await res.json();
-              container.innerHTML = '';
+        container.innerHTML = '<div class="text-muted small ps-4">Loading...</div>';
+        try {
+          const res = await fetch(`/api/fs/ls?path=${encodeURIComponent(path)}`);
+          const data = await res.json();
+          container.innerHTML = "";
 
-              if (!data.entries) return;
+          if (!data.entries) return;
 
-              // Filter directories only
-              const dirs = data.entries.filter(e => e.type === 'directory');
-              dirs.sort((a,b) => a.name.localeCompare(b.name));
+          // Filter directories only
+          const dirs = data.entries.filter((e) => e.type === "directory");
+          dirs.sort((a, b) => a.name.localeCompare(b.name));
 
-              if (dirs.length === 0) {
-                  container.innerHTML = '<div class="text-muted small ps-4"><i>Empty</i></div>';
-                  return;
-              }
+          if (dirs.length === 0) {
+            container.innerHTML = '<div class="text-muted small ps-4"><i>Empty</i></div>';
+            return;
+          }
 
-              dirs.forEach(dir => {
-                  const dirPath = path === '/' ? `/${dir.name}` : `${path}/${dir.name}`;
-                  const node = document.createElement('div');
-                  node.innerHTML = `
+          dirs.forEach((dir) => {
+            const dirPath = path === "/" ? `/${dir.name}` : `${path}/${dir.name}`;
+            const node = document.createElement("div");
+            node.innerHTML = `
                     <div class="d-flex align-items-center">
                         <span class="tree-toggle" onclick="toggleTreeNode(event, '${dirPath}', this)"><i class="fas fa-chevron-right"></i></span>
                         <div class="tree-item flex-grow-1" onclick="loadFilesystem('${dirPath}')" data-path="${dirPath}">
@@ -382,22 +405,21 @@
                     </div>
                     <div class="tree-group"></div>
                   `;
-                  container.appendChild(node);
-              });
-
-          } catch(e) {
-              container.innerHTML = `<div class="text-danger small ps-4">Error</div>`;
-          }
+            container.appendChild(node);
+          });
+        } catch (e) {
+          container.innerHTML = `<div class="text-danger small ps-4">Error</div>`;
+        }
       }
 
       async function loadFilesystem(path = "/") {
         currentFsPath = path;
         renderBreadcrumbs(path);
-        
+
         // Highlight active tree item
-        document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll(".tree-item").forEach((el) => el.classList.remove("active"));
         const activeItem = document.querySelector(`.tree-item[data-path="${path}"]`);
-        if(activeItem) activeItem.classList.add('active');
+        if (activeItem) activeItem.classList.add("active");
 
         const tbody = document.getElementById("fsFileList");
         if (document.getElementById("fsLoading")) document.getElementById("fsLoading").style.display = "inline-block";
