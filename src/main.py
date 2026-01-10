@@ -334,46 +334,47 @@ class CatalogClient:
         key = self.get_catalog_key()
         dht_key = "catalog_" + key[:56]
 
-        print(f"Removing from Catalog {dht_key}...")
+        print(f"Removing from Catalog {dht_key} and Purging Key {manifest_id[:8]}...")
 
-        # We spoof sender for now
         client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
         client_info = {"sender_id": client_id_hex,
                        "host": "127.0.0.1", "port": 0}
 
-        # In handle_delete logic we implemented, passing the ID as value is sufficient
-        # for catalog_ keys to filter it out.
-        payload = {
+        # Payload 1: Remove from Catalog List
+        payload_list = {
             "key": dht_key,
             "value": manifest_id,
+            "sender": client_info
+        }
+        
+        # Payload 2: Remove ID key (if stored as KV)
+        payload_kv = {
+            "key": manifest_id,
+            "value": "",
             "sender": client_info
         }
 
         success_count = 0
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            # We must hit the nodes holding the bucket.
-            # Ideally we should find_k_closest first, but for proper deletion
-            # we broadcast to ALL known nodes to ensure consistency across the mesh.
-            targets = distributor_nodes  # Removed limit slice [:20]
+            targets = distributor_nodes
             print(f"Catalog Delete: Broadcasting to {len(targets)} nodes...")
 
-            # Use gather for faster parallel execution if list is large
             tasks = []
             for node in targets:
                 url = f"{node.url}/dht/delete"
-                tasks.append(session.post(url, json=payload, timeout=2))
+                # Send both requests
+                tasks.append(session.post(url, json=payload_list, timeout=2))
+                tasks.append(session.post(url, json=payload_kv, timeout=2))
 
-            # Execute all
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for res in results:
                     if not isinstance(res, Exception) and res.status == 200:
-                        # Optionally check body for {"removed": true}
-                        success_count += 1
+                        success_count += 0.5
 
         if success_count > 0:
-            print(f"✅ Removed from Catalog on {success_count} nodes.")
+            print(f"✅ Removed from Catalog/DHT on {int(success_count)} nodes.")
         else:
             print(f"⚠️ Failed to remove from catalog (or node unreachable).")
 

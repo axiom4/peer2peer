@@ -97,7 +97,7 @@
                     <th>Filename</th>
                     <th>Manifest ID</th>
                     <th>Size</th>
-                    <th>Actions</th>
+                    <th style="width: 200px; min-width: 200px;">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="catalogList">
@@ -515,7 +515,7 @@
                     <td class="fw-bold">${item.name}</td>
                     <td><code class="user-select-all small">${item.id}</code></td>
                     <td>${formatBytes(item.size || 0)}</td>
-                    <td>
+                    <td style="white-space: nowrap;">
                         <button class="btn btn-sm btn-outline-info" onclick="showDistributionGraph('${
                           item.id
                         }', true)" title="View Map"><i class="fas fa-project-diagram"></i></button>

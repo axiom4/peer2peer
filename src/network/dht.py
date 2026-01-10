@@ -311,11 +311,13 @@ class DHT:
                         item_id = get_id_safe(item)
                         # Logic: Remove if ID matches OR if exact string matches
                         if item_id == target_id:
-                            print(f"  -> Removing item by ID: {item[:50]}...")
+                            print(f"  -> REMOVED item by ID match: {target_id}")
                             continue
                         if item == value:
-                            print(f"  -> Removing item by String Match")
+                            print(f"  -> REMOVED item by String match")
                             continue
+                        # If we have an ID mismatch, let's log it just in case of doubt (optional)
+                        # print(f"  -> Keeping item: {item_id} != {target_id}")
                         new_list.append(item)
 
                     self.storage[key_hex] = new_list

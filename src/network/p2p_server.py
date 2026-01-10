@@ -23,7 +23,8 @@ class P2PServer:
         self.storage_dir = storage_dir
         self.peers = set()
         self.max_peers = 25  # Increased for DHT connectivity
-        self.seen_requests = collections.deque(maxlen=1000)  # Loop prevention
+        self.seen_requests = collections.deque(maxlen=1000)  # Loop prevention for DHT
+        self.seen_reclaims = collections.deque(maxlen=1000) # Loop prevention for Chunk Deletion
 
         # Initialize DHT
         self.dht = DHT(host, port, storage_dir)
@@ -44,6 +45,7 @@ class P2PServer:
             web.get('/peers', self.handle_get_peers),
             web.put('/chunk/{id}', self.handle_upload_chunk),
             web.delete('/chunk/{id}', self.handle_delete_chunk),
+            web.post('/chunks/delete_batch', self.handle_delete_chunks_batch), # NEW: Batch delete endpoint
             web.get('/chunk/{id}', self.handle_download_chunk),
             # HEAD is handled implicitly by GET
             web.get('/chunks', self.handle_list_chunks),
@@ -99,8 +101,48 @@ class P2PServer:
             data = await request.json()
             # Value is optional for generic delete, but required for Catalog list item removal
             val = data.get('value', '')
-            resp = self.dht.handle_delete(
-                data['key'], val, data['sender'])
+            key = data['key']
+            
+            print(f"DHT DELETE REQUEST received for key={key[:8]}... val={val[:20]}...")
+            
+            # GOSSIP PROPAGATION
+            # Create a unique ID for this delete request to dedup
+            import hashlib
+            msg_id = hashlib.sha256(f"{key}{val}".encode()).hexdigest()
+            
+            if msg_id in self.seen_requests:
+                # Already processed, stop propagation
+                # print(f"  -> Skipping duplicate delete request {msg_id[:8]}")
+                return web.json_response({"status": "ok", "msg": "already_seen"})
+            
+            self.seen_requests.append(msg_id)
+            
+            # 1. Execute Local Delete
+            resp = self.dht.handle_delete(key, val, data['sender'])
+            print(f"  -> Local delete result: {resp}")
+            
+            # 2. Propagate to Peers (Gossip)
+            # Fire and forget propagation to random 5 peers (or all if small)
+            # This ensures network-wide cleanup
+            peers_list = list(self.peers)
+            if peers_list:
+                targets = random.sample(peers_list, min(len(peers_list), 5))
+                
+                async def propagate(target_url):
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                             await session.post(
+                                 f"{target_url}/dht/delete", 
+                                 json=data, # Forward exact payload
+                                 timeout=1
+                             )
+                    except:
+                        pass
+                
+                # Launch background tasks
+                for p in targets:
+                    asyncio.create_task(propagate(p))
+            
             return web.json_response(resp)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -226,6 +268,31 @@ class P2PServer:
 
     async def handle_delete_chunk(self, request):
         chunk_id = request.match_info['id']
+        
+        # --- Chunk Deletion Gossip Propagation ---
+        # Identify message uniqueness to prevent loops
+        if chunk_id in self.seen_reclaims:
+            # If we already processed this delete recently, stop propagation
+            # But we still check local file just in case
+            pass
+        else:
+            self.seen_reclaims.append(chunk_id)
+            # Propagate "Delete Chunk" command to peers
+            peers_cl = list(self.peers)
+            if peers_cl:
+                # Random subset fanout (Gossip)
+                targets = random.sample(peers_cl, min(len(peers_cl), 5))
+                async def gossip_delete(target_node):
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                             await session.delete(f"{target_node}/chunk/{chunk_id}", timeout=1)
+                    except: 
+                        pass
+                
+                for p in targets:
+                    asyncio.create_task(gossip_delete(p))
+        # ------------------------------------------
+
         path = os.path.join(self.storage_dir, chunk_id)
         if os.path.exists(path):
             try:
@@ -235,6 +302,72 @@ class P2PServer:
             except Exception as e:
                 return web.Response(status=500, text=str(e))
         return web.Response(status=404, text="Chunk not found")
+
+    async def handle_delete_chunks_batch(self, request):
+        """
+        Handles batch deletion of chunks and propagates via Gossip.
+        Payload: { "chunk_ids": ["id1", "id2", ...] }
+        """
+        try:
+            data = await request.json()
+            chunk_ids = data.get("chunk_ids", [])
+        except:
+            return web.Response(status=400, text="Invalid JSON")
+
+        if not chunk_ids:
+            return web.Response(status=200, text="No chunks provided")
+        
+        # Filter new IDs to propagate
+        new_ids_to_propagate = []
+        deleted_count = 0
+        
+        for chunk_id in chunk_ids:
+            # 1. Local Delete (always attempt, regardless of seen_reclaims status)
+            path = os.path.join(self.storage_dir, chunk_id)
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.error(f"Error deleting chunk {chunk_id}: {e}")
+
+            # 2. Check Loop Prevention
+            if chunk_id in self.seen_reclaims:
+                continue
+            
+            self.seen_reclaims.append(chunk_id)
+            new_ids_to_propagate.append(chunk_id)
+
+        logger.info(f"Batch Delete: Removed {deleted_count} local chunks. Propagating {len(new_ids_to_propagate)} IDs.")
+
+        # GOSSIP PROPAGATION
+        if new_ids_to_propagate:
+            peers_cl = list(self.peers)
+            if peers_cl:
+                targets = random.sample(peers_cl, min(len(peers_cl), 5)) # Fanout 5
+                
+                payload = {"chunk_ids": new_ids_to_propagate}
+                
+                async def propagate_batch(target_url):
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            await session.post(
+                                f"{target_url}/chunks/delete_batch",
+                                json=payload,
+                                timeout=2
+                            )
+                    except Exception:
+                        pass
+                
+                for p in targets:
+                    asyncio.create_task(propagate_batch(p))
+
+        return web.json_response({
+            "status": "ok", 
+            "processed": len(chunk_ids), 
+            "locally_deleted": deleted_count,
+            "propagated": len(new_ids_to_propagate)
+        })
 
     async def handle_check_chunk(self, request):
         """Responds only with 200/404 if it has the chunk, without body."""
