@@ -11,8 +11,10 @@ An advanced peer-to-peer distribution and storage system designed to ensure secu
   - **5x Redundancy**: Each chunk is replicated across 5 distinct nodes.
   - **UDP Storage Search**: Data location is discovered in real-time using UDP Broadcast queries (`QUERY_CHUNK`) and DHT lookups.
   - **Auto-Discovery**: Automatic peer detection via UDP Broadcast (Port 9999) and iterative Kademlia-like DHT.
-- **Total Privacy**: The "manifest" required to reconstruct the file resides only on the client and does NOT contain IP addresses, making it impossible to trace data location from the file itself.
+- **Total Privacy**: The "manifest" required to reconstruct the file contains no IP addresses.
+- **Global Public Catalog**: Manifests can be optionally published to a distributed DHT Catalog, allowing any peer to discover and download files without prior possession of the manifest file.
 - **Direct Streaming**: Files can be streamed directly from the distributed network to the browser without intermediate disk storage.
+- **Robust Deletion**: Implements a reliable "Gossip" protocol for deletion propagation and a secure DHT cleanup mechanism to permanently remove file metadata.
 - **Garbage Collection**: Built-in "Prune" functionality to identify and remove orphan chunks (data not referenced by valid manifests) to free up space.
 - **Graceful Exit**: Nodes support a "Unjoin" operation to offload data to peers and clean up storage before shutting down.
 - **Open Standards**: Full OpenAPI 3.0 documentation available on every node (`/openapi`).
@@ -31,9 +33,12 @@ The system consists of autonomous nodes forming a dynamic mesh network.
 ### 2. P2P Nodes
 
 - **Async Architecture**: Fully asynchronous nodes based on `aiohttp` and `asyncio` for high concurrency.
-- **Distributed Hash Table (DHT)**: Implements an async Kademlia-lite DHT for efficient peer and content lookup without flooding.
+- **Distributed Hash Table (DHT)**:
+    - **Routing**: Kademlia-lite implementation for peer discovery.
+    - **Storage**: Key-Value store supporting both atomic values and Append-Only Lists (for Catalog).
+    - **Persistence**: Index is saved to `dht_index.json` with robust loading/saving logic.
+- **Gossip Protocol**: Used for propagating high-priority events like "Delete Chunk" and "Delete Manifest" to ensure eventual consistency across the mesh.
 - No central database: each node only knows its direct neighbors and DHT routing table.
-- "Gossip" and "Query Forwarding" logic for request propagation and data retrieval without central indexing.
 
 ### Graphical Visualization
 

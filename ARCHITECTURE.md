@@ -46,6 +46,14 @@ At the end of the upload, a `.manifest` (JSON) file is generated on the client s
 - **Compression Mode**: Explicitly stores if compression was enabled/disabled to ensure correct reconstruction.
 - **Privacy**: Does not contain original file names or node IP addresses (location is found dynamically during restore via Network Query/DHT).
 
+### D. Global Catalog Publishing (Optional)
+
+To enable data discovery without sharing the `.manifest` file manually, the Client publishes the manifest metadata to the **DHT Global Catalog**:
+
+1. **Key Generation**: A deterministic key (e.g., `catalog_global_v1`) is hashed.
+2. **List Append**: The manifest JSON is sent as a `STORE` request to the DHT, but handled as a "List Append" operation rather than a overwrite.
+3. **Persistence**: Nodes holding this key update their local `dht_index.json`, adding the new entry to the list of available files.
+
 ---
 
 ## 2. Data Reconstruction (Download)
@@ -78,6 +86,37 @@ For web downloads, the system bypasses disk writing:
 - **Generator Pipeline**: Chunks are fetched, decrypted, and yielded one by one in memory.
 - **HTTP Stream**: The backend streams these bytes directly to the browser (`application/octet-stream`).
 - **No Temp Files**: Reconstructed file is never saved to the server's disk, complying with strict ephemeral storage requirements.
+
+## 3. Deletion Protocol (Secure Cleanup)
+
+Removing data from a decentralized network requires a robust propagation strategy to ensure "Zombie" data does not persist.
+
+### A. Manifest Deletion (DHT)
+
+When a user requests to delete a file:
+
+1. **Resolution**: The system identifies the target Manifest ID (SHA-256).
+2. **Propagated Request**: A `DHT_DELETE` request is sent to entry nodes.
+3. **Smart Matching**: The DHT node processes the delete request using **Safe/Robust Matching**:
+   - It iterates through the list stored at `catalog_global_v1`.
+   - It attempts to parse each entry as JSON to find its `id`.
+   - **Condition**: If `entry.id == target_id` OR `entry == target_string`, the item is removed.
+   - This handles edge cases like whitespace differences or string/integer type mismatches.
+4. **Persistence**: The updated list is immediately flushed to `dht_index.json`.
+
+### B. Chunk Deletion (Gossip)
+
+Data chunks are removed via a **Gossip Protocol**:
+
+1. **Batching**: The Client creates a batch of up to 500 chunk IDs (`/chunks/delete_batch`).
+2. **Local Removal**: The receiving node deletes files from its `network_data/` directory.
+3. **Deduplication**: The node checks a `seen_requests` cache (using a hash of the request + nonce).
+   - If seen: Stop.
+   - If new: Add to cache.
+4. **Rumor Spreading**: The node selects 5 random peers from its routing table and forwards the delete command.
+   - This ensures exponential propagation across the mesh (`O(log N)`).
+
+---
 
 ## Flow Diagram (Sequence)
 
@@ -355,6 +394,34 @@ sequenceDiagram
    Node->>Node: Delete Storage Directory
    Node->>Node: Shutdown Process
 ```
+
+## 5. API Reference & Message Protocol
+
+The nodes communicate via a RESTful HTTP JSON API.
+
+### Node API (`/api/`) - Web UI Backend
+
+- `GET /api/manifests`: List all files discovered in the Global Catalog.
+- `GET /api/manifests/{id}`: Resolve a Manifest ID to file details.
+- `DELETE /api/manifests/{id}`: Initiate the deletion protocol (DHT + Gossip).
+- `POST /api/upload`: Upload a new file.
+- `POST /api/download`: Request a download (reconstruction).
+- `GET /api/stream/{id}`: Stream file content directly.
+
+### P2P Protocol (`/`) - Inter-node
+
+- **Data Transfer**:
+  - `PUT /chunk/{id}`: Store a binary chunk.
+  - `GET /chunk/{id}`: Retrieve a binary chunk.
+  - `DELETE /chunk/{id}`: Delete a chunk locally (no propagation).
+  - `POST /chunks/delete_batch`: **Gossip** - Propagate batch deletion of chunks.
+
+- **DHT & Discovery**:
+  - `POST /dht/ping`: Check liveness.
+  - `POST /dht/store`: Store a Value or Append to List (Catalog).
+  - `POST /dht/find_value`: Retrieve a Value or List (Catalog).
+  - `POST /dht/delete`: **Gossip** - Propagate removal of a key/value pair from the DHT.
+  - `GET /peers`: Return list of known peer URLs.
 
 ### D. Ungraceful Failure (Crash Recovery)
 
