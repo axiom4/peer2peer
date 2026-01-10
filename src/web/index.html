@@ -764,10 +764,10 @@
       // Init
       document.addEventListener("DOMContentLoaded", function () {
         console.log("Initializing Dashboard...");
-        loadManifests();
+        loadCatalog();
       });
-      // Refresh manifest list every 10 sec
-      setInterval(loadManifests, 10000);
+      // Refresh catalog periodically
+      setInterval(loadCatalog, 30000);
     </script>
   </body>
 </html>
