@@ -460,33 +460,21 @@ async def get_manifest_detail(request):
 
 async def delete_manifest(request):
     name = request.match_info['name']
-    if not name.endswith('.manifest'):
-        name += '.manifest'
-
-    manifest_path = os.path.join('manifests', name)
-    if not os.path.exists(manifest_path):
-        return web.json_response({"error": "Manifest not found"}, status=404)
-
-    # 1. Load manifest to get chunks
-    try:
-        with open(manifest_path, 'r') as f:
-            data = json.load(f)
-    except Exception as e:
-        return web.json_response({"error": f"Invalid manifest: {e}"}, status=500)
-
-    # 2. Discover Peers
-    # Use a stronger discovery method.
-    # First, quick UDP scan
+    
+    # Check if input is a Manifest ID (64 char hex)
+    is_id = len(name) == 64 and all(c in '0123456789abcdefABCDEF' for c in name)
+    
+    # 1. Discover Peers
+    # Use a stronger discovery method (Scan + Crawl)
     found_peers = await scan_network(timeout=3.0)
 
-    # If possible, crawl to find more peers from the found ones
-    queue = list(found_peers)
+    # Crawl to find more peers
     visited = set(found_peers)
-
+    queue = list(found_peers)
+    
     if queue:
         print(f"Delete: Initial scan found {len(queue)} peers. Crawling...")
         async with aiohttp.ClientSession() as session:
-            # Shallow crawl (depth 1) to find more nodes specially for DELETE
             crawl_tasks = []
             for p in queue:
                 crawl_tasks.append(session.get(f"{p}/peers", timeout=1.0))
@@ -506,27 +494,96 @@ async def delete_manifest(request):
 
     final_peers = list(visited)
     print(f"Delete: Target peers count: {len(final_peers)}")
+    
+    chunks_to_delete = []
+    manifest_id_to_delete = None
 
-    if final_peers:
+    # 2. Resolve Manifest (Memory/Network vs Local File)
+    if is_id:
+        manifest_id_to_delete = name
+        print(f"Delete: Resolving manifest ID {name} from network...")
+        
+        # Try to fetch manifest content to identify chunks
+        manifest_data = None
+        if final_peers:
+            async with aiohttp.ClientSession() as session:
+                for peer in final_peers:
+                    try:
+                        # Try to get the manifest blob
+                        async with session.get(f"{peer}/chunk/{name}", timeout=2.0) as resp:
+                            if resp.status == 200:
+                                manifest_data = await resp.read()
+                                print(f"Delete: Found manifest at {peer}")
+                                break
+                    except:
+                        continue
+        
+        if manifest_data:
+            try:
+                data = json.loads(manifest_data)
+                chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
+                print(f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
+            except Exception as e:
+                print(f"Delete: Failed to parse manifest JSON: {e}")
+        else:
+             print("Delete: Warning - Manifest content not found on network. Only deleting ID.")
+
+    else:
+        # Legacy File Mode
+        if not name.endswith('.manifest'):
+            name += '.manifest'
+
+        manifest_path = os.path.join('manifests', name)
+        if not os.path.exists(manifest_path):
+             return web.json_response({"error": "Manifest not found (locally) and not a valid ID"}, status=404)
+
+        try:
+            with open(manifest_path, 'r') as f:
+                data = json.load(f)
+                chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
+            
+            # Delete local file
+            os.remove(manifest_path)
+        except Exception as e:
+            return web.json_response({"error": f"Invalid manifest or file error: {e}"}, status=500)
+
+    # 3. Execute Distributed Delete
+    if final_peers and (chunks_to_delete or manifest_id_to_delete):
         async with aiohttp.ClientSession() as session:
             tasks = []
-            for chunk in data.get('chunks', []):
-                chunk_id = chunk['id']
-                # Request deletion on all peers
+            
+            # Delete Content Chunks
+            for chunk_id in chunks_to_delete:
                 for peer in final_peers:
-                    # Fire and forget mostly
+                    # Fire and forget delete
                     tasks.append(session.delete(f"{peer}/chunk/{chunk_id}"))
 
+            # Delete Manifest Chunk (if ID mode)
+            if manifest_id_to_delete:
+                for peer in final_peers:
+                    tasks.append(session.delete(f"{peer}/chunk/{manifest_id_to_delete}"))
+
             if tasks:
+                print(f"Delete: Broadcasting {len(tasks)} delete requests...")
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    # 3. Delete local manifest file
-    try:
-        os.remove(manifest_path)
-    except Exception as e:
-        return web.json_response({"error": f"Failed to delete manifest file: {e}"}, status=500)
+    # 4. Remove from DHT Public Catalog
+    if is_id or manifest_id_to_delete:
+        target_id = manifest_id_to_delete if manifest_id_to_delete else name
+        try:
+             # We need active remote nodes for DHT operation
+             # Reuse found_peers (URLs) converted to RemoteHttpNode
+             if final_peers:
+                 from src.network.remote_node import RemoteHttpNode
+                 # Quick wrapper
+                 dht_nodes = [RemoteHttpNode(url) for url in final_peers]
+                 
+                 cat = CatalogClient()
+                 await cat.delete(target_id, dht_nodes)
+        except Exception as e:
+             print(f"Delete: Failed to remove from DHT Catalog: {e}")
 
-    return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested chunk deletion on network."})
+    return web.json_response({"status": "ok", "message": f"Deleted manifest {name} and requested deletion of {len(chunks_to_delete)} chunks."})
 
 
 async def stream_download(request):
@@ -617,9 +674,18 @@ async def stream_download_by_id(request):
         )
 
         if not result:
-            return web.Response(status=500, text="Reconstruction failed (Chunks missing)")
+            return web.Response(status=404, text=f"File content with ID {manifest_id} not found on the network (might be deleted).")
 
         shard_mgr, chunks_data, compression_mode, manifest_obj = result
+
+    except RuntimeError as e:
+        # Handle "Chunk not found" specifically
+        error_msg = str(e)
+        if "not found on network" in error_msg:
+             return web.Response(status=404, text=f"Not Found: {error_msg}")
+        return web.Response(status=500, text=f"Internal Error: {error_msg}")
+    except Exception as e:
+        return web.Response(status=500, text=f"Internal Error: {e}")
 
         # Get filename directly from in-memory manifest object
         original_filename = manifest_obj.get(
@@ -684,12 +750,20 @@ async def get_manifest_by_id(request):
 
     # 2. Fetch Manifest
     try:
+        # If active_peers list is empty or small, retrieve_chunk might fail fast.
+        # Ensure we have a valid distributor even if peers are few.
+        if not nodes:
+             # Last resort fallback
+             nodes = [RemoteHttpNode(f"http://127.0.0.1:{8000+i}") for i in range(5)]
+             distributor = DistributionStrategy(nodes)
+
         manifest_data_bytes = await asyncio.get_event_loop().run_in_executor(
             None, lambda: distributor.retrieve_chunk(manifest_id)
         )
         data = json.loads(manifest_data_bytes)
     except Exception as e:
-        return web.json_response({"error": f"Failed to retrieve manifest {manifest_id}: {e}"}, status=404)
+        print(f"Map Error: Manifest {manifest_id} retrieval failed: {e}")
+        return web.json_response({"error": f"Failed to retrieve manifest {manifest_id}: {str(e)}"}, status=404)
 
     # 3. Location Lookup (Enrich with 'locations')
     if active_peers:

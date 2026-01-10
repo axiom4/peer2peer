@@ -56,6 +56,7 @@ class P2PServer:
             web.post('/dht/find_node', self.handle_dht_find_node),
             web.post('/dht/find_value', self.handle_dht_find_value),
             web.post('/dht/store', self.handle_dht_store),
+            web.post('/dht/delete', self.handle_dht_delete),
         ])
 
         self.known_peer = known_peer  # Url of a peer to join at startup
@@ -89,6 +90,17 @@ class P2PServer:
             data = await request.json()
             resp = self.dht.handle_store(
                 data['key'], data['value'], data['sender'])
+            return web.json_response(resp)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_dht_delete(self, request):
+        try:
+            data = await request.json()
+            # Value is optional for generic delete, but required for Catalog list item removal
+            val = data.get('value', '') 
+            resp = self.dht.handle_delete(
+                data['key'], val, data['sender'])
             return web.json_response(resp)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

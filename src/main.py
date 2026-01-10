@@ -327,6 +327,56 @@ class CatalogClient:
         else:
             print(f"⚠️ Failed to publish to catalog.")
 
+    async def delete(self, manifest_id, distributor_nodes):
+        """
+        Removes a manifest from the public catalog.
+        """
+        key = self.get_catalog_key()
+        dht_key = "catalog_" + key[:56]
+
+        print(f"Removing from Catalog {dht_key}...")
+        
+        # We spoof sender for now
+        client_id_hex = hashlib.sha256(b"client_cli").hexdigest()
+        client_info = {"sender_id": client_id_hex,
+                       "host": "127.0.0.1", "port": 0}
+        
+        # In handle_delete logic we implemented, passing the ID as value is sufficient
+        # for catalog_ keys to filter it out.
+        payload = {
+            "key": dht_key,
+            "value": manifest_id, 
+            "sender": client_info
+        }
+
+        success_count = 0
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            # We must hit the nodes holding the bucket.
+            # Ideally we should find_k_closest first, but for proper deletion 
+            # we broadcast to ALL known nodes to ensure consistency across the mesh.
+            targets = distributor_nodes  # Removed limit slice [:20]
+            print(f"Catalog Delete: Broadcasting to {len(targets)} nodes...")
+            
+            # Use gather for faster parallel execution if list is large
+            tasks = []
+            for node in targets:
+                url = f"{node.url}/dht/delete"
+                tasks.append(session.post(url, json=payload, timeout=2))
+            
+            # Execute all
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if not isinstance(res, Exception) and res.status == 200:
+                         # Optionally check body for {"removed": true}
+                         success_count += 1
+        
+        if success_count > 0:
+            print(f"✅ Removed from Catalog on {success_count} nodes.")
+        else:
+            print(f"⚠️ Failed to remove from catalog (or node unreachable).")
+
     async def fetch(self, distributor_nodes):
         """
         Retrieves the catalog from the network.
@@ -343,13 +393,14 @@ class CatalogClient:
         catalogs = []
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            # Query multiple nodes because DHT propagation might be slow or partial
-            random.shuffle(distributor_nodes)
-            targets = distributor_nodes[:20]
-
-            for node in targets:
-                try:
-                    url = f"{node.url}/dht/find_value"
+            # Query ALL known nodes to ensure we don't miss any data due to partition
+            # random.shuffle(distributor_nodes)
+            targets = distributor_nodes  # [:20] Removed limit
+            
+            # Helper for parallel fetch
+            async def fetch_one(node_url):
+                 try:
+                    url = f"{node_url}/dht/find_value"
                     payload = {
                         "key": dht_key,
                         "sender": client_info
@@ -359,11 +410,19 @@ class CatalogClient:
                         if "value" in res:
                             val = res["value"]
                             if isinstance(val, list):
-                                catalogs.extend(val)
+                                return val
                             else:
-                                catalogs.append(val)
-                except Exception:
-                    pass
+                                return [val]
+                 except:
+                     pass
+                 return []
+
+            tasks = [fetch_one(node.url) for node in targets]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for res in results:
+                if isinstance(res, list):
+                    catalogs.extend(res)
 
         # Deduplicate
         unique = {}
