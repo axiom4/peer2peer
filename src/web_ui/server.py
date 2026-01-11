@@ -45,10 +45,7 @@ def start_web_server(port=8888):
         web.post('/api/fs/delete', handle_fs_delete),
         web.post('/api/fs/move', handle_fs_move),
         web.static('/downloads', 'downloads'),
-        # Serve static assets if any (js, css inside static folder if needed,
-        # currently html is served by views, but if html references other files...)
-        # We might need to expose static folder if we had css/js files there.
-        # But for now the htmls are standalone or use CDNs/inline.
+        web.static('/static', os.path.join(os.path.dirname(__file__), 'static')),
     ])
     print(f"Web UI available at http://localhost:{port}")
     web.run_app(app, port=port)
