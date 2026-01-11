@@ -364,7 +364,22 @@ async function loadFilesystem(path = "/") {
         tbody.appendChild(tr);
       });
     } else {
-      if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Empty directory</td></tr>';
+      if (tbody.children.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5">
+              <div 
+                class="d-flex flex-column align-items-center justify-content-center p-5 border-dashed border-2 rounded m-2" 
+                style="background-color: #f8fff9; border: 2px dashed #198754; cursor: pointer; color: #198754;"
+                onclick="triggerFsUpload()"
+              >
+                  <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                  <h5 class="fw-bold">Empty Directory</h5>
+                  <p class="mb-0">Drag & Drop files here or click to upload</p>
+              </div>
+            </td>
+          </tr>`;
+      }
     }
   } catch (e) {
     console.error(e);
