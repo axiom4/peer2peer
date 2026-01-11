@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
+
 class DHTStorage:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -27,13 +28,15 @@ class DHTStorage:
                         timestamp REAL
                     )
                 """)
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON dht(timestamp)")
+                self.conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ts ON dht(timestamp)")
         except Exception as e:
             logger.error(f"Failed to initialize DHT database: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         try:
-            cursor = self.conn.execute("SELECT value FROM dht WHERE key = ?", (key,))
+            cursor = self.conn.execute(
+                "SELECT value FROM dht WHERE key = ?", (key,))
             row = cursor.fetchone()
             if row:
                 return json.loads(row['value'])
@@ -63,7 +66,8 @@ class DHTStorage:
 
     def contains(self, key: str) -> bool:
         try:
-            cursor = self.conn.execute("SELECT 1 FROM dht WHERE key = ?", (key,))
+            cursor = self.conn.execute(
+                "SELECT 1 FROM dht WHERE key = ?", (key,))
             return cursor.fetchone() is not None
         except Exception:
             return False
@@ -92,7 +96,8 @@ class DHTStorage:
                         (limit_ts, f"{exclude_prefix}%")
                     )
                 else:
-                    self.conn.execute("DELETE FROM dht WHERE timestamp < ?", (limit_ts,))
+                    self.conn.execute(
+                        "DELETE FROM dht WHERE timestamp < ?", (limit_ts,))
         except Exception as e:
             logger.error(f"DHT Cleanup Error: {e}")
 

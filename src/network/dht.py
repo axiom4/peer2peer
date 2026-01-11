@@ -151,11 +151,11 @@ class DHT:
         self.port = port
         self.storage_dir = storage_dir
         self.routing_table = RoutingTable(self.node_id)
-        
+
         # New SQLite Storage
         self.db_path = os.path.join(storage_dir, "dht_index.sqlite")
         self.storage = DHTStorage(self.db_path)
-        
+
         # One-time migration from old json
         self._migrate_legacy_db(os.path.join(storage_dir, "dht_index.json"))
 
@@ -165,7 +165,7 @@ class DHT:
             try:
                 with open(json_path, 'r') as f:
                     data = json.load(f)
-                
+
                 count = 0
                 now = time.time()
                 for k, v in data.items():
@@ -174,16 +174,17 @@ class DHT:
                         self.storage.set(k, v)
                         count += 1
                         continue
-                    
+
                     if isinstance(v, str):
                         # Upgrade old string value to dict format
-                         self.storage.set(k, {'v': v, 'ts': now})
-                         count += 1
+                        self.storage.set(k, {'v': v, 'ts': now})
+                        count += 1
                     elif isinstance(v, dict):
-                         self.storage.set(k, v)
-                         count += 1
-                
-                logger.info(f"Migrated {count} keys. Deleting old dht_index.json.")
+                        self.storage.set(k, v)
+                        count += 1
+
+                logger.info(
+                    f"Migrated {count} keys. Deleting old dht_index.json.")
                 os.remove(json_path)
             except Exception as e:
                 logger.error(f"Migration Failed: {e}")
@@ -198,12 +199,11 @@ class DHT:
             await asyncio.sleep(CLEANUP_INTERVAL)
             try:
                 # Use SQL efficient cleanup
-                self.storage.cleanup_expired(DATA_TTL, exclude_prefix="catalog_")
+                self.storage.cleanup_expired(
+                    DATA_TTL, exclude_prefix="catalog_")
                 logger.debug("DHT Cleanup completed via SQLite")
             except Exception as e:
                 logger.error(f"Error in DHT cleanup loop: {e}")
-
-
 
     async def bootstrap(self, peers: List[str]):
         """Join the network via list of peer URLs."""
@@ -253,7 +253,7 @@ class DHT:
 
         # 1. Check Storage
         val = self.storage.get(key_hex)
-        
+
         if val:
             # Catalog logic: clean expired entries inside the list
             if key_hex.startswith("catalog_") and isinstance(val, list):
@@ -262,11 +262,11 @@ class DHT:
                 for item in val:
                     try:
                         obj = json.loads(item)
-                        if now - obj.get('ts', 0) < 900: # 15 min TTL
+                        if now - obj.get('ts', 0) < 900:  # 15 min TTL
                             valid_items.append(item)
                     except:
                         pass
-                
+
                 # Update DB if filtered
                 if len(valid_items) != len(val):
                     self.storage.set(key_hex, valid_items)
@@ -274,7 +274,7 @@ class DHT:
 
             # Return Value
             if isinstance(val, dict) and 'v' in val:
-                 return {"value": val['v']}
+                return {"value": val['v']}
             return {"value": val}
 
         # 2. Return Closest Nodes if not found
@@ -302,26 +302,26 @@ class DHT:
                 new_id = new_obj.get('id')
             except:
                 pass
-            
+
             cleaned_list = []
             for existing in current_list:
                 keep = True
                 if existing == value:
                     keep = False
                 elif new_id:
-                     try:
+                    try:
                         ex_obj = json.loads(existing)
                         if ex_obj.get('id') == new_id:
                             keep = False
-                     except:
-                         pass
+                    except:
+                        pass
                 if keep:
                     cleaned_list.append(existing)
-            
+
             cleaned_list.append(value)
             if len(cleaned_list) > 100:
                 cleaned_list = cleaned_list[-100:]
-            
+
             self.storage.set(key_hex, cleaned_list)
             return {"status": "ok"}
 
@@ -337,9 +337,9 @@ class DHT:
             current_list = self.storage.get(key_hex)
             if not current_list or not isinstance(current_list, list):
                 return {"status": "not_found", "removed": False}
-            
+
             original_len = len(current_list)
-            
+
             # Helper
             def get_id_safe(json_str):
                 try:
@@ -347,7 +347,7 @@ class DHT:
                     return obj.get('id') if isinstance(obj, dict) else None
                 except:
                     return None
-            
+
             target_id = None
             try:
                 obj = json.loads(value)
@@ -355,26 +355,26 @@ class DHT:
                     target_id = obj['id']
             except:
                 target_id = value
-            
+
             if target_id:
                 new_list = []
                 target_id_str = str(target_id).strip()
                 for item in current_list:
-                     item_id = get_id_safe(item)
-                     item_id_str = str(item_id).strip() if item_id else "None"
-                     
-                     if item_id_str == target_id_str:
-                         continue
-                     if item == value:
-                         continue
-                     new_list.append(item)
-                
+                    item_id = get_id_safe(item)
+                    item_id_str = str(item_id).strip() if item_id else "None"
+
+                    if item_id_str == target_id_str:
+                        continue
+                    if item == value:
+                        continue
+                    new_list.append(item)
+
                 if len(new_list) != original_len:
                     self.storage.set(key_hex, new_list)
                     return {"status": "ok", "removed": True}
-            
+
             return {"status": "not_found", "removed": False}
-        
+
         # Standard Key Deletion
         if self.storage.contains(key_hex):
             self.storage.delete(key_hex)
