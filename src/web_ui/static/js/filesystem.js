@@ -785,7 +785,7 @@ async function processBatchQueue(tasks) {
   const totalTasks = tasks.length;
   // Calculate total size for weighted progress
   const totalBytes = tasks.reduce((acc, t) => acc + t.file.size, 0);
-  
+
   // State for concurrent progress tracking
   // We track bytes uploaded per file index
   const progressState = new Array(totalTasks).fill(0);
@@ -807,52 +807,52 @@ async function processBatchQueue(tasks) {
   let currentIndex = 0;
 
   const updateUI = () => {
-      const currentBytes = progressState.reduce((a, b) => a + b, 0);
-      const percent = totalBytes > 0 ? Math.round((currentBytes / totalBytes) * 100) : 100;
-      
-      const pb = document.getElementById("batchProgressBar");
-      if (pb) {
-          pb.style.width = percent + "%";
-          pb.innerText = percent + "%";
-      }
-      
-      const text = document.getElementById("batchStatusText");
-      if (text) {
-          // Show how many active
-          const active = currentIndex - completedCount - errorCount;
-          text.innerText = `Processing: ${completedCount}/${totalTasks} done (${active} active)`;
-      }
+    const currentBytes = progressState.reduce((a, b) => a + b, 0);
+    const percent = totalBytes > 0 ? Math.round((currentBytes / totalBytes) * 100) : 100;
+
+    const pb = document.getElementById("batchProgressBar");
+    if (pb) {
+      pb.style.width = percent + "%";
+      pb.innerText = percent + "%";
+    }
+
+    const text = document.getElementById("batchStatusText");
+    if (text) {
+      // Show how many active
+      const active = currentIndex - completedCount - errorCount;
+      text.innerText = `Processing: ${completedCount}/${totalTasks} done (${active} active)`;
+    }
   };
 
   // Worker function
   const worker = async () => {
-      while (currentIndex < totalTasks) {
-          const i = currentIndex++; // Atomic claim
-          const task = tasks[i];
-          
-          try {
-              await performUpload(task.file, task.targetPath, (pct, msg) => {
-                  progressState[i] = (pct / 100) * task.file.size;
-                  updateUI();
-              });
-              // Ensure full credit on completion
-              progressState[i] = task.file.size;
-              completedCount++;
-          } catch (e) {
-              console.error(`Failed to upload ${task.file.name}: ${e}`);
-              // Give full progress credit anyway to not stall the bar visual
-              progressState[i] = task.file.size; 
-              errorCount++;
-          } finally {
-              updateUI();
-          }
+    while (currentIndex < totalTasks) {
+      const i = currentIndex++; // Atomic claim
+      const task = tasks[i];
+
+      try {
+        await performUpload(task.file, task.targetPath, (pct, msg) => {
+          progressState[i] = (pct / 100) * task.file.size;
+          updateUI();
+        });
+        // Ensure full credit on completion
+        progressState[i] = task.file.size;
+        completedCount++;
+      } catch (e) {
+        console.error(`Failed to upload ${task.file.name}: ${e}`);
+        // Give full progress credit anyway to not stall the bar visual
+        progressState[i] = task.file.size;
+        errorCount++;
+      } finally {
+        updateUI();
       }
+    }
   };
 
   // Start pool
   const workers = [];
   for (let w = 0; w < Math.min(CONCURRENCY_LIMIT, totalTasks); w++) {
-      workers.push(worker());
+    workers.push(worker());
   }
 
   await Promise.all(workers);
@@ -867,7 +867,7 @@ async function processBatchQueue(tasks) {
   }
   document.getElementById("batchStatusText").innerText = `Batch completed. ${completedCount}/${totalTasks} uploaded.`;
   if (errorCount > 0) {
-      document.getElementById("batchStatusText").innerText += ` (${errorCount} errors)`;
+    document.getElementById("batchStatusText").innerText += ` (${errorCount} errors)`;
   }
 
   setTimeout(() => statusDiv.classList.remove("active"), 3000);
