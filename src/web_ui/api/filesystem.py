@@ -289,7 +289,8 @@ async def handle_fs_delete(request):
 
                 async def delete_with_name_scan_optimized(mid, fname):
                     async with sem:
-                        await _delete_file_from_network(mid, name_hint=fname, peers=active_peers)
+                        # Use force=True to ensure we clean up IDs even if manifests are missing
+                        await _delete_file_from_network(mid, name_hint=fname, peers=active_peers, force=True)
                         return fname
 
                 pending = []
