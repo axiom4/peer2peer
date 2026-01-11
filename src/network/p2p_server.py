@@ -81,7 +81,11 @@ class P2PServer:
             # Direct lookup in local storage
             # Note: We bypass dht.handle_find_value to avoid
             # polluting routing table with WebUI client info.
-            val = self.dht.storage.get(key)
+            raw_val = self.dht.storage.get(key)
+            val = raw_val
+            if isinstance(raw_val, dict) and 'v' in raw_val:
+                val = raw_val['v']
+                
             return web.json_response({"value": val})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -199,6 +203,9 @@ class P2PServer:
     async def start(self):
         # Start UDP Discovery
         self.discovery.start()
+        
+        # Start DHT maintenance
+        await self.dht.start()
 
         runner = web.AppRunner(self.app)
         await runner.setup()
@@ -212,12 +219,114 @@ class P2PServer:
             logger.info(f"Bootstrapped DHT from known peer {self.known_peer}")
 
         # Announce local chunks to DHT
-        asyncio.create_task(self._announce_all_chunks())
+        # Start Periodic Re-announcement Loop instead of one-shot
+        asyncio.create_task(self._announce_loop())
+        
+        # Start Catalog Re-Publish Loop (Self-Consistency)
+        asyncio.create_task(self._republish_catalog_loop())
 
         # Periodic sync with discovery service
         asyncio.create_task(self._sync_discovery())
 
         # Keep alive
+        while True:
+            await asyncio.sleep(3600)
+    
+    async def _republish_catalog_loop(self):
+        """
+        Periodically scans local chunks to identify hidden Manifests (Catalog Mining)
+        and re-publishes them to the public Catalog so they don't expire.
+        """
+        import hashlib
+        
+        # Hardcoded Key Logic matching main.py CatalogClient
+        CATALOG_BASE_KEY = hashlib.sha256(b"catalog_global_v1").hexdigest()
+        DHT_CATALOG_KEY = "catalog_" + CATALOG_BASE_KEY[:56]
+        
+        loop = asyncio.get_event_loop()
+
+        while True:
+            # Wait initial start time + interval (e.g. 1 minute first run)
+            await asyncio.sleep(60) 
+            
+            try:
+                if not os.path.exists(self.storage_dir):
+                    continue
+
+                chunk_ids = [f for f in os.listdir(self.storage_dir) if not f.startswith('.')]
+                
+                if not chunk_ids:
+                     continue
+                     
+                republished_count = 0
+                
+                # Scan all chunks
+                for chunk_id in chunk_ids:
+                    file_path = os.path.join(self.storage_dir, chunk_id)
+                    
+                    try:
+                        # Synchronous read in thread pool to avoid blocking async loop
+                        def _read_candidate():
+                            try:
+                                # Optimization: Manifests are small (<75KB)
+                                if os.path.getsize(file_path) > 75 * 1024:
+                                    return None
+                                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    return f.read()
+                            except:
+                                return None
+
+                        content = await loop.run_in_executor(None, _read_candidate)
+                        
+                        if not content:
+                            continue
+                            
+                        # Quick heuristic check
+                        if not (content.strip().startswith('{') and 'chunks' in content):
+                            continue
+
+                        # Parse JSON
+                        try:
+                            manifest = json.loads(content)
+                            if isinstance(manifest, dict) and 'id' in manifest and 'chunks' in manifest:
+                                # Valid Manifest Found!
+                                entry = json.dumps({
+                                    "id": manifest['id'],
+                                    "name": manifest.get('filename', 'Unknown'),
+                                    "size": manifest.get('filesize', 0),
+                                    "ts": int(time.time())
+                                })
+                                
+                                # Publish to DHT
+                                await self.dht.put(DHT_CATALOG_KEY, entry)
+                                republished_count += 1
+                        except:
+                            pass
+                            
+                    except Exception:
+                        pass
+                    
+                    # Yield to other tasks
+                    await asyncio.sleep(0)
+
+                if republished_count > 0:
+                    logger.info(f"Catalog Mining: Republished {republished_count} manifests found in raw storage.")
+                    
+            except Exception as e:
+                logger.error(f"Catalog republish error: {e}")
+            
+            # Sleep 5 minutes
+            await asyncio.sleep(300)
+
+    async def _announce_loop(self):
+        """Periodically re-announces local chunks to refresh DHT TTL."""
+        while True:
+            await self._announce_all_chunks()
+            # Interval < TTL (TTL=600s, Interval=300s is safe)
+            await asyncio.sleep(300)
+
+    async def _announce_all_chunks(self):
+        # Give some time for neighbours to be discovered
         while True:
             await asyncio.sleep(3600)
 
@@ -357,7 +466,13 @@ class P2PServer:
                 except Exception as e:
                     logger.error(f"Error deleting chunk {chunk_id}: {e}")
 
-            # 2. Check Loop Prevention
+            # 2. DHT Index Cleanup
+            # Even if we don't have the file physically, we might have the index reference.
+            # Or if we just deleted it, we definitely want to remove the index reference.
+            if self.dht.delete_local(chunk_id):
+                 logger.info(f"DHT: Cleaned up index for deleted chunk {chunk_id}")
+
+            # 3. Check Loop Prevention
             if chunk_id in self.seen_reclaims:
                 continue
 

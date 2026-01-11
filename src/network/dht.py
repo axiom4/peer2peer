@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 K_BUCKET_SIZE = 20
 ALPHA = 3
 ID_BITS = 256
+DATA_TTL = 600  # 10 Minutes TTL for chunk records
+CLEANUP_INTERVAL = 60  # Check for expired items every minute
 
 
 class NodeId:
@@ -149,21 +151,104 @@ class DHT:
         self.routing_table = RoutingTable(self.node_id)
         # chunk_id -> provider_url (Indexing)
         self.storage: Dict[str, str] = {}
-
+        
         # Re-enable Disk Persistence but with TTL logic handled in logic
         self.db_path = os.path.join(storage_dir, "dht_index.json")
         self._load_db()
+
+    async def start(self):
+        """Starts background maintenance tasks."""
+        asyncio.create_task(self._cleanup_loop())
+
+    async def _cleanup_loop(self):
+        """Periodically removes expired entries from DHT storage."""
+        while True:
+            await asyncio.sleep(CLEANUP_INTERVAL)
+            try:
+                now = time.time()
+                expired = []
+                # Scan purely for expiration
+                for k, v in list(self.storage.items()):
+                    # Skip Catalog items (lists) which have internal logic or long retention
+                    if k.startswith("catalog_"):
+                        continue
+                        
+                    # Check Dict format items with timestamp
+                    if isinstance(v, dict) and 'ts' in v:
+                        if now - v['ts'] > DATA_TTL:
+                            expired.append(k)
+                
+                if expired:
+                    logger.info(f"DHT Cleanup: Removing {len(expired)} expired entries.")
+                    for k in expired:
+                        del self.storage[k]
+                    self._save_db()
+            except Exception as e:
+                logger.error(f"Error in DHT cleanup loop: {e}")
 
     def _load_db(self):
         logger.info(f"Loading DHT DB from {self.db_path}...")
         if os.path.exists(self.db_path):
             try:
                 with open(self.db_path, 'r') as f:
-                    self.storage = json.load(f)
+                    data = json.load(f)
+
+                # MIGRATION & SELF-HEALING
+                # 1. Convert old string values to TTL-aware dicts
+                # 2. Validate local files
+                
+                new_storage = {}
+                keys_removed = 0
+                now = time.time()
+
+                for key, val in data.items():
+                    # Handle Catalog Lists (preserve as is)
+                    if key.startswith("catalog_"):
+                        new_storage[key] = val
+                        continue
+
+                    # Handle Chunk Records
+                    # Format migration: String -> Dict
+                    if isinstance(val, str):
+                        # It's an old record. 
+                        # SELF-HEALING CHECK: If it points to me, does it exist?
+                        if str(self.port) in val and len(key) == 64:
+                            # Direct check
+                            chunk_path = os.path.join(os.path.dirname(self.db_path), key)
+                            if not os.path.exists(chunk_path):
+                                keys_removed += 1
+                                continue
+                        
+                        # Upgrade to new format with 'fresh' timestamp so it survives one cycle
+                        new_storage[key] = {'v': val, 'ts': now}
+                    
+                    elif isinstance(val, dict) and 'v' in val:
+                        # Already new format
+                        # Check expiry? No, strictly load what we have, let cleanup loop handle it.
+                        
+                        # Still apply Self-Healing for consistency on restart
+                        actual_val = val['v']
+                        if str(self.port) in actual_val and len(key) == 64:
+                             chunk_path = os.path.join(os.path.dirname(self.db_path), key)
+                             if not os.path.exists(chunk_path):
+                                 keys_removed += 1
+                                 continue
+                        
+                        new_storage[key] = val
+                    else:
+                        # Unknown garbage
+                        keys_removed += 1
+
+                self.storage = new_storage
+                
+                if keys_removed > 0:
+                    logger.warning(f"DHT: Pruned {keys_removed} invalid/legacy entries during load.")
+                    self._save_db()
+
                 logger.info(f"Loaded {len(self.storage)} keys from DB.")
-                # logger.info(f"Keys: {list(self.storage.keys())}")
             except Exception as e:
                 logger.error(f"Failed to load DHT DB: {e}")
+                self.storage = {}
         else:
             logger.warning(f"DHT DB not found at {self.db_path}")
 
@@ -231,12 +316,12 @@ class DHT:
                 for item in items:
                     try:
                         obj = json.loads(item)
-                        # TTL: 24 hours (86400 seconds)
-                        if now - obj.get('ts', 0) < 86400:
+                        # TTL: 15 minutes (900 seconds) for Catalog Freshness
+                        if now - obj.get('ts', 0) < 900:
                             valid_items.append(item)
                     except:
-                        # Keep untimestamped legacy items
-                        valid_items.append(item)
+                        # Keep untimestamped legacy items? No, flush them to enforce consistency
+                        pass
 
                 # Check for updates
                 if len(valid_items) != len(items):
@@ -245,7 +330,11 @@ class DHT:
 
         # If we have the value (location of chunk), return it
         if key_hex in self.storage:
-            return {"value": self.storage[key_hex]}
+            val = self.storage[key_hex]
+            # Unwrap if it's a TTL dict
+            if isinstance(val, dict) and 'v' in val:
+                return {"value": val['v']}
+            return {"value": val}
 
         # Else return k closest nodes
         try:
@@ -267,16 +356,49 @@ class DHT:
                 self.storage[key_hex] = []  # Initialize as list
 
             if isinstance(self.storage[key_hex], list):
-                # Avoid duplicates
-                if value not in self.storage[key_hex]:
-                    self.storage[key_hex].append(value)
-                    # Cap size to prevent abuse (e.g. 50 items per bucket)
-                    if len(self.storage[key_hex]) > 50:
-                        self.storage[key_hex].pop(0)
+                # IMPROVED MERGE STRATEGY
+                # 1. Parse incoming new value
+                new_id = None
+                try:
+                    new_obj = json.loads(value)
+                    new_id = new_obj.get('id')
+                except:
+                    pass
+                
+                # 2. Filter out explicit duplicates (same content) or Same-ID (update ts)
+                cleaned_list = []
+                for existing in self.storage[key_hex]:
+                    keep = True
+                    # If exact match
+                    if existing == value:
+                        keep = False
+                    # If ID match (Update scenario)
+                    elif new_id:
+                        try:
+                            ex_obj = json.loads(existing)
+                            if ex_obj.get('id') == new_id:
+                                keep = False # Replace old version with new
+                        except:
+                            pass
+                    
+                    if keep:
+                        cleaned_list.append(existing)
+                
+                # 3. Append new value
+                cleaned_list.append(value)
+                
+                # 4. Cap size
+                if len(cleaned_list) > 100: # Increased limit
+                    cleaned_list = cleaned_list[-100:] # Keep recent
+                
+                self.storage[key_hex] = cleaned_list
+                
             self._save_db()
             return {"status": "ok"}
 
-        self.storage[key_hex] = value
+        # Modern TTL Storage for Chunks
+        # Value is { "v": raw_val, "ts": time.time() }
+        self.storage[key_hex] = {"v": value, "ts": time.time()}
         self._save_db()
         return {"status": "ok"}
 
@@ -369,6 +491,15 @@ class DHT:
             return {"status": "ok"}
 
         return {"status": "not_found"}
+
+    def delete_local(self, key_hex: str):
+        """Removes a key from local storage directly (used by P2PServer)."""
+        if key_hex in self.storage:
+            del self.storage[key_hex]
+            self._save_db()
+            logger.info(f"DHT: Locally deleted key {key_hex}")
+            return True
+        return False
 
     # Client Side Operations
 

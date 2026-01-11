@@ -651,13 +651,28 @@ async def delete_manifest(request):
                     except Exception as e:
                         print(f"Delete: Could not calculate ID: {e}")
 
-            # Delete local file
-            os.remove(manifest_path)
+            # Delete local file - MOVED to after network success
+            # os.remove(manifest_path)
+            pass
         except Exception as e:
             return web.json_response({"error": f"Invalid manifest or file error: {e}"}, status=500)
 
     # 3. Execute Distributed Delete
-    await _delete_file_from_network(manifest_id_to_delete)
+    
+    # Get Force Flag
+    force_delete = request.query.get('force', '').lower() == 'true'
+
+    try:
+        await _delete_file_from_network(manifest_id_to_delete, known_chunks=chunks_to_delete, force=force_delete)
+        
+        # Only remove local file if network deletion attempt was successful (or at least initiated safely)
+        if not is_id and manifest_path and os.path.exists(manifest_path):
+            os.remove(manifest_path)
+            print(f"Delete: Removed local manifest file {manifest_path}")
+            
+    except Exception as e:
+        print(f"Delete: Aborted due to error: {e}")
+        return web.json_response({"error": f"Safe Delete Aborted: {str(e)}"}, status=500)
 
     return web.json_response({"status": "ok", "message": f"Deleted manifest {name}"})
 
@@ -1163,10 +1178,17 @@ async def handle_fs_add_file(request):
             return web.json_response({"error": str(e)}, status=500)
 
 
-async def _delete_file_from_network(manifest_id, name_hint=None, peers=None):
+async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, known_chunks=None, force=False):
     """
     Helper function to delete manifest and chunks from the network.
     Refactored from delete_manifest.
+    
+    Args:
+        manifest_id (str): The ID of the manifest to delete.
+        name_hint (str, optional): Filename for logs.
+        peers (list, optional): List of peers to contact.
+        known_chunks (list, optional): List of chunk IDs if already known locally.
+        force (bool): If True, proceed even if manifest is unavailable (deletes only the ID).
     """
     # print(f"Delete: Starting network deletion for ID={manifest_id} Name={name_hint}")
 
@@ -1177,47 +1199,73 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None):
     # Unique list
     final_peers = list(set(peers)) if peers else []
 
-    chunks_to_delete = []
+    chunks_to_delete = known_chunks if known_chunks else []
 
-    # 2. Fetch Manifest content to identify Chunks
+    # 2. Fetch Manifest content to identify Chunks (Only if we don't know them yet)
     # We must do this BEFORE deleting the manifest itself :)
-    distrib = DistributionStrategy([])
-    manifest_data = None
+    if not chunks_to_delete:
+        distrib = DistributionStrategy([])
+        manifest_data = None
 
-    # Try fetching via multiple peers manually since DistributionStrategy needs nodes list
-    if final_peers:
-        # Use simple HTTP fetch first to find the manifest storage
-        async with aiohttp.ClientSession() as session:
-            for peer in final_peers[:10]:
-                try:
-                    # Retrieve the manifest chunk directly
-                    async with session.get(f"{peer}/chunk/{manifest_id}", timeout=3) as r:
-                        if r.status == 200:
-                            manifest_data = await r.read()
+        # Try fetching via multiple peers in parallel (Race for Success)
+        if final_peers:
+            # Use simple HTTP fetch with parallel race strategy to find the manifest storage quickly
+            async with aiohttp.ClientSession() as session:
+                async def _fetch_manifest_race(peer_url):
+                    try:
+                        async with session.get(f"{peer_url}/chunk/{manifest_id}", timeout=3) as r:
+                            if r.status == 200:
+                                return await r.read()
+                    except Exception:
+                        pass
+                    return None
+
+                tasks = [asyncio.create_task(_fetch_manifest_race(peer)) for peer in final_peers[:10]]
+                
+                # Use as_completed to find first success
+                for coro in asyncio.as_completed(tasks):
+                    try:
+                        result = await coro
+                        if result:
+                            manifest_data = result
                             break
-                except:
-                    continue
+                    except Exception:
+                        pass
 
-    if manifest_data:
-        try:
-            # It might be JSON string, bytes, or dict
-            if isinstance(manifest_data, (str, bytes)):
-                data = json.loads(manifest_data)
+                # Cancel remaining tasks to free resources
+                for t in tasks:
+                     if not t.done():
+                         t.cancel()
+
+        if manifest_data:
+            try:
+                # It might be JSON string, bytes, or dict
+                if isinstance(manifest_data, (str, bytes)):
+                    data = json.loads(manifest_data)
+                else:
+                    data = manifest_data
+                chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
+                print(
+                    f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
+            except Exception as e:
+                print(f"Delete: Failed to parse manifest JSON: {e}")
+        else:
+            if force:
+                print(f"Delete: FORCE mode active. Proceeding to delete ID {manifest_id} despite missing manifest.")
             else:
-                data = manifest_data
-            chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-            print(
-                f"Delete: Found {len(chunks_to_delete)} content chunks to remove.")
-        except Exception as e:
-            print(f"Delete: Failed to parse manifest JSON: {e}")
-    else:
-        print("Delete: Warning - Manifest content not found on network. Only deleting ID.")
+                # ABORT if manifest not found - This prevents orphaned chunks
+                error_msg = f"Delete: CRITICAL ABORT - Manifest {manifest_id} not reachable. Cannot identify chunks to delete safely."
+                print(error_msg)
+                # Raise exception to stop the process before we delete the Manifest ID
+                raise Exception("Safe Delete Abort: Manifest unavailable. Use force=true to override.")
 
     # 3. Execute Distributed Delete
     broadcast_targets = list(final_peers) if final_peers else []
-    if not broadcast_targets:
-        broadcast_targets = [
-            f"http://127.0.0.1:{p}" for p in range(8000, 8003)]
+    
+    # Aggressively include local simulation ports to ensure catalog deletion works
+    # even if discovery missed some nodes.
+    local_cluster = [f"http://127.0.0.1:{p}" for p in range(8000, 8020)]
+    broadcast_targets = list(set(broadcast_targets + local_cluster))
 
     if broadcast_targets and (chunks_to_delete or manifest_id):
         async with aiohttp.ClientSession() as session:
