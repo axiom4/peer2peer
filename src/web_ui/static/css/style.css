@@ -58,7 +58,7 @@ body {
   bottom: 20px;
   right: 20px;
   width: 300px;
-  z-index: 1050; /* Above everything */
+  z-index: 2000; /* Ensure visibility over modals */
   background: white;
   padding: 15px;
   border-radius: 8px;

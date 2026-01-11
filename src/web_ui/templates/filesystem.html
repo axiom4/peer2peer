@@ -70,11 +70,6 @@
   <input type="checkbox" id="compressionCheck" checked />
 </div>
 
-<!-- Global Upload Status Toast -->
-<div id="uploadStatus" class="position-fixed bottom-0 end-0 m-3 p-3 bg-white border rounded shadow" style="display: none; width: 300px; z-index: 2000">
-  <!-- Injected by JS -->
-</div>
-
 <!-- Modal for Distribution Graph -->
 <div class="modal fade" id="distModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -83,8 +78,8 @@
         <h5 class="modal-title">File Chunk Map</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body p-0 bg-light position-relative">
-        <div id="dist-graph" style="width: 100%; height: 100%"></div>
+      <div class="modal-body p-0 bg-light position-relative" style="height: 100%;">
+        <div id="dist-graph" style="width: 100%; height: 100%;"></div>
       </div>
     </div>
   </div>

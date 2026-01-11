@@ -361,12 +361,13 @@ async def upload_file(request):
                 upload_dir = "uploads_temp"
                 os.makedirs(upload_dir, exist_ok=True)
                 temp_path = os.path.join(upload_dir, filename)
+                loop = asyncio.get_event_loop()
                 with open(temp_path, 'wb') as f:
                     while True:
                         chunk = await field.read_chunk()
                         if not chunk:
                             break
-                        f.write(chunk)
+                        await loop.run_in_executor(None, f.write, chunk)
         elif field.name == 'redundancy':
             val = await field.read(decode=True)
             try:

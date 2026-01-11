@@ -38,7 +38,8 @@ async function showDistributionGraph(identifier, isPublic = true) {
 
     // Add Hosts as Nodes
     hostSet.forEach((loc) => {
-      const label = loc.split(":").pop();
+      // Show full authority (IP:Port) instead of just Port to avoid ambiguity
+      const label = loc.replace(/^https?:\/\//, "");
       nodes.push({
         id: loc,
         label: label,
@@ -64,15 +65,21 @@ async function showDistributionGraph(identifier, isPublic = true) {
         const uniqueCurr = [...new Set(currentHosts)];
 
         if (prevHosts.length > 0) {
-          uniqueCurr.forEach((curr, currIdx) => {
-            let prev = prevHosts[currIdx % prevHosts.length];
-            edges.push({
-              from: prev,
-              to: curr,
-              label: chunkLabel,
-              arrows: "to",
-              color: "#2196F3",
-              font: { align: "horizontal", size: 10, background: "white" },
+          // Full Mesh Connection: Any node holding Chunk N can transition to Any node holding Chunk N+1
+          // This correctly visualizes the redundancy and available paths.
+          prevHosts.forEach((prev) => {
+            uniqueCurr.forEach((curr) => {
+              // Avoid duplicate edges if multiple chunks follow same path? 
+              // uniqueCurr is unique per step. prevHours is unique.
+              // So we just add edges.
+              edges.push({
+                from: prev,
+                to: curr,
+                label: chunkLabel, // e.g. "C1"
+                arrows: "to",
+                color: "#2196F3",
+                font: { align: "horizontal", size: 10, background: "white" },
+              });
             });
           });
         }
@@ -590,11 +597,14 @@ async function handleDrop(ev, destName) {
 // External File Drop (Upload with Folder Support)
 function handleFileDragOver(ev) {
   ev.preventDefault();
+  ev.stopPropagation(); // Ensure event doesn't bubble
   ev.dataTransfer.dropEffect = "copy";
   document.getElementById("fsCard").classList.add("border-primary", "border-3");
 }
 
 function handleFileDragLeave(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
   document.getElementById("fsCard").classList.remove("border-primary", "border-3");
 }
 
@@ -679,7 +689,7 @@ function performUpload(file, targetPath, onProgress) {
 function uploadFileDirectly(file, targetPath = null) {
   const tPath = targetPath || currentFsPath;
   const statusDiv = document.getElementById("uploadStatus");
-  statusDiv.className = "active";
+  statusDiv.classList.add("active");
 
   // Reset UI
   statusDiv.innerHTML = `
@@ -713,10 +723,13 @@ function uploadFileDirectly(file, targetPath = null) {
 
 // Batch Upload Logic
 async function processBatchQueue(tasks) {
-  if (!tasks || tasks.length === 0) return;
+  if (!tasks || tasks.length === 0) {
+    document.getElementById("uploadStatus").classList.remove("active");
+    return;
+  }
 
   const statusDiv = document.getElementById("uploadStatus");
-  statusDiv.className = "active";
+  statusDiv.classList.add("active");
 
   const totalTasks = tasks.length;
   let completed = 0;
@@ -824,56 +837,98 @@ async function ensureDirectory(fullPath) {
 
 async function handleFileDrop(ev) {
   ev.preventDefault();
+  ev.stopPropagation(); // Stop bubbling
   document.getElementById("fsCard").classList.remove("border-primary", "border-3");
+
+  const statusDiv = document.getElementById("uploadStatus");
+  if (!statusDiv) {
+    alert("Error: UI Status Component missing. Please refresh the page.");
+    return;
+  }
 
   const items = ev.dataTransfer.items;
   if (!items || items.length === 0) return;
 
-  // CRITICAL: Capture entries IMMEDIATELY before any blocking call (like confirm)
-  // because DataTransfer items are volatile and cleared on event end/inactivity.
+  // CRITICAL: Capture entries IMMEDIATELY before any blocking call
   const entries = [];
-  for (let i = 0; i < items.length; i++) {
-    const entry = items[i].webkitGetAsEntry();
-    if (entry) {
-      entries.push(entry);
+  try {
+    for (let i = 0; i < items.length; i++) {
+      let entry = null;
+      if (items[i].webkitGetAsEntry) {
+        entry = items[i].webkitGetAsEntry();
+      } else if (items[i].getAsEntry) {
+        entry = items[i].getAsEntry();
+      }
+      if (entry) {
+        entries.push(entry);
+      }
     }
+  } catch (e) {
+    console.error("DnD access error:", e);
   }
 
   if (entries.length === 0) return;
 
   if (!confirm(`Upload ${entries.length} items (and subfolders) to current folder?`)) return;
 
+  // Show "Scanning" status immediately
+  statusDiv.classList.add("active");
+  statusDiv.innerHTML = `
+        <div class="d-flex align-items-center">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+            <div>Scanning directory structure...</div>
+        </div>
+    `;
+
   const batchTasks = [];
 
   // Recursive collector
   async function collect(item) {
-    if (item.isFile) {
-      return new Promise((resolve) => {
-        item.file((f) => {
-          const relativeFolder = item.fullPath.substring(0, item.fullPath.lastIndexOf("/"));
-          const targetDir = (currentFsPath === "/" ? "" : currentFsPath) + relativeFolder;
-          ensureDirectory(targetDir).then(() => {
-            batchTasks.push({ file: f, targetPath: targetDir });
-            resolve();
-          });
+    try {
+      if (item.isFile) {
+        return new Promise((resolve) => {
+          item.file(
+            (f) => {
+              const relativeFolder = item.fullPath.substring(0, item.fullPath.lastIndexOf("/"));
+              const targetDir = (currentFsPath === "/" ? "" : currentFsPath) + relativeFolder;
+              ensureDirectory(targetDir).then(() => {
+                batchTasks.push({ file: f, targetPath: targetDir });
+                resolve();
+              });
+            },
+            (err) => {
+              console.warn("File read error:", err);
+              resolve();
+            }
+          );
         });
-      });
-    } else if (item.isDirectory) {
-      const dirPath = (currentFsPath === "/" ? "" : currentFsPath) + item.fullPath;
-      await ensureDirectory(dirPath);
-      const dirReader = item.createReader();
-      const entries = await getAllEntries(dirReader);
-      for (const entry of entries) {
-        await collect(entry);
+      } else if (item.isDirectory) {
+        const dirPath = (currentFsPath === "/" ? "" : currentFsPath) + item.fullPath;
+        await ensureDirectory(dirPath);
+        const dirReader = item.createReader();
+        const entries = await getAllEntries(dirReader);
+        for (const entry of entries) {
+          await collect(entry);
+        }
       }
+    } catch (e) {
+      console.error("Collect error:", e);
     }
   }
 
-  for (const entry of entries) {
-    await collect(entry);
-  }
+  try {
+    for (const entry of entries) {
+      await collect(entry);
+    }
 
-  if (batchTasks.length > 0) {
-    processBatchQueue(batchTasks);
+    if (batchTasks.length > 0) {
+      processBatchQueue(batchTasks);
+    } else {
+      statusDiv.innerHTML = `<div class="alert alert-warning mb-0">No files found to upload.</div>`;
+      setTimeout(() => statusDiv.classList.remove("active"), 3000);
+    }
+  } catch (e) {
+    statusDiv.innerHTML = `<div class="alert alert-danger mb-0">Scan Failed: ${e.message}</div>`;
+    setTimeout(() => statusDiv.classList.remove("active"), 5000);
   }
 }

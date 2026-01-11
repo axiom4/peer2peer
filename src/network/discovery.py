@@ -116,8 +116,8 @@ class DiscoveryService:
         return list(self.peers)
 
 
-async def scan_network(timeout=3):
-    """Utility for clients to find active nodes without being a full node."""
+def _scan_network_sync(timeout=3):
+    """Utility for clients to find active nodes without being a full node. (Blocking Version)"""
     logger.info("Scanning local network for P2P nodes...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -126,21 +126,12 @@ async def scan_network(timeout=3):
     except AttributeError:
         pass
 
-    # For scanning, we listen to HELLO broadcasts. We MUST bind to BROADCAST_PORT.
-    # If the local P2P server is running, we rely on SO_REUSEPORT.
-
     sock.settimeout(timeout)
 
-    # Force reuse port again
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         sock.bind(('', BROADCAST_PORT))
     except OSError:
-
-        # If we can't bind 9999, we can try to send a query and wait for reply?
-        # But HELLO is unsolicited.
-        # Fallback: Just return empty or try to bind random and maybe some broadcast goes there? No.
         logger.warning(
             "Could not bind to broadcast port for scan. Scanning might fail if port 9999 is taken.")
         sock.close()
@@ -169,6 +160,12 @@ async def scan_network(timeout=3):
 
     sock.close()
     return list(found_peers)
+
+
+async def scan_network(timeout=3):
+    """Async wrapper for network scanning."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _scan_network_sync(timeout))
 
 
 def _udp_search_sync(chunk_ids, timeout):

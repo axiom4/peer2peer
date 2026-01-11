@@ -112,7 +112,7 @@ async function showDistributionGraph(identifier, isPublic = false) {
 
     // Add Hosts as Nodes
     hostSet.forEach((loc) => {
-      const label = loc.split(":").pop();
+      const label = loc.replace(/^https?:\/\//, ""); // Full authority
       nodes.push({
         id: loc,
         label: label,
@@ -138,16 +138,16 @@ async function showDistributionGraph(identifier, isPublic = false) {
         const uniqueCurr = [...new Set(currentHosts)];
 
         if (prevHosts.length > 0) {
-          uniqueCurr.forEach((curr, currIdx) => {
-            let prev = prevHosts[currIdx % prevHosts.length];
-
-            edges.push({
-              from: prev,
-              to: curr,
-              label: chunkLabel,
-              arrows: "to",
-              color: "#2196F3",
-              font: { align: "horizontal", size: 10, background: "white" },
+          prevHosts.forEach((prev) => {
+            uniqueCurr.forEach((curr) => {
+              edges.push({
+                from: prev,
+                to: curr,
+                label: chunkLabel,
+                arrows: "to",
+                color: "#2196F3",
+                font: { align: "horizontal", size: 10, background: "white" },
+              });
             });
           });
         }

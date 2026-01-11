@@ -559,7 +559,8 @@ def distribute(args, progress_callback=None):
             msg = f"Processing: {int(sharded_bytes/1024)}KB | Distributed: {int(processed_bytes/1024)}KB"
             progress_callback(pct, msg)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    # Limit concurrency to avoid thread exhaustion
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
 
         # 1. Pipeline Loop: Shard -> Submit -> Check Done (Interleaved)
         for chunk in chunk_generator:
@@ -702,12 +703,12 @@ def collect_chunks_data(manifest, distributor, progress_callback=None):
         except Exception as e:
             return None, f"Chunk {chunk_info['index']} Fetch Error: {e}"
 
-    print(f"Starting parallel upload (max 10 workers)...")
+    print(f"Starting parallel download (max 5 workers)...")
 
     total_chunks = len(manifest['chunks'])
     completed_chunks = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_chunk = {executor.submit(
             download_chunk_task, c): c for c in manifest['chunks']}
 
@@ -849,13 +850,13 @@ def reconstruct(args, progress_callback=None, stream=False):
         except Exception as e:
             return None, f"  -> FATAL ERROR Chunk {chunk_info['index']}: {e}"
 
-    print(f"Starting parallel upload (max 20 workers)...")
+    print(f"Starting parallel download (max 8 workers)...")
 
     total_chunks = len(manifest['chunks'])
     completed_chunks = 0
 
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             future_to_chunk = {executor.submit(
                 download_chunk_task, c): c for c in manifest['chunks']}
 
