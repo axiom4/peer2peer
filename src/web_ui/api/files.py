@@ -106,7 +106,8 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
                 print(f"Delete: FORCE mode active for {manifest_id}")
             else:
                 # Warning instead of Abort - Allows cleaning up "ghost" manifests
-                print(f"Delete: Manifest content unavailable. Proceeding with ID removal to clear ghost entry.")
+                print(
+                    f"Delete: Manifest content unavailable. Proceeding with ID removal to clear ghost entry.")
                 # raise Exception("Safe Delete Abort: Manifest unavailable. Use force=true to override.")
 
     broadcast_targets = list(final_peers) if final_peers else []
