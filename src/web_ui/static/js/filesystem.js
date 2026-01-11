@@ -69,7 +69,7 @@ async function showDistributionGraph(identifier, isPublic = true) {
           // This correctly visualizes the redundancy and available paths.
           prevHosts.forEach((prev) => {
             uniqueCurr.forEach((curr) => {
-              // Avoid duplicate edges if multiple chunks follow same path? 
+              // Avoid duplicate edges if multiple chunks follow same path?
               // uniqueCurr is unique per step. prevHours is unique.
               // So we just add edges.
               edges.push({
