@@ -157,20 +157,32 @@ async function showDistributionGraph(identifier, isPublic = false) {
     // Clear loading spinner
     graphContainer.innerHTML = "";
 
+    // 1. Identify Unique Hosts & Create Nodes
     const nodes = [];
     const edges = [];
     const ids = new Set();
-    const sortedChunks = manifest.chunks.sort((a, b) => a.index - b.index);
 
-    // Collect all unique Hosts first to create specific nodes
+    // Add Start Node
+    nodes.push({
+      id: "SOURCE",
+      label: "START",
+      color: "#FF9800",
+      size: 30,
+      shape: "database",
+    });
+    ids.add("SOURCE");
+
+    const sortedChunks = manifest.chunks.sort((a, b) => a.index - b.index);
     const hostSet = new Set();
+
+    // Collect all hosts
     sortedChunks.forEach((c) => {
       (c.locations || []).forEach((loc) => hostSet.add(loc));
     });
 
-    // Add Hosts as Nodes
+    // Add Host Nodes
     hostSet.forEach((loc) => {
-      const label = loc.replace(/^https?:\/\//, ""); // Full authority
+      const label = loc.replace(/^https?:\/\//, ""); // Show IP:Port
       nodes.push({
         id: loc,
         label: label,
@@ -181,38 +193,57 @@ async function showDistributionGraph(identifier, isPublic = false) {
       ids.add(loc);
     });
 
-    // Add Start Node (Source)
-    nodes.push({ id: "SOURCE", label: "START", color: "#FF9800", size: 30, shape: "database" });
-    ids.add("SOURCE");
-
-    // Build edges based on sequence: SOURCE -> Chunks(0) -> Chunks(1) ...
+    // 2. Build Edges (Chunk Flow) - Aggregated
     let prevHosts = ["SOURCE"];
+
+    // Map to aggregate edges: "from_to" -> { list of chunks }
+    const edgeMap = new Map();
 
     sortedChunks.forEach((chunk, idx) => {
       const chunkLabel = `C${chunk.index}`;
-      const currentHosts = chunk.locations || [];
+      const locations = chunk.locations || [];
 
-      if (currentHosts.length > 0) {
-        const uniqueCurr = [...new Set(currentHosts)];
+      if (locations.length > 0) {
+        const uniqueCurrentHosts = [...new Set(locations)];
 
-        if (prevHosts.length > 0) {
-          prevHosts.forEach((prev) => {
-            uniqueCurr.forEach((curr) => {
-              edges.push({
-                from: prev,
-                to: curr,
-                label: chunkLabel,
-                arrows: "to",
-                color: "#2196F3",
-                font: { align: "horizontal", size: 10, background: "white" },
-              });
-            });
+        prevHosts.forEach((prev) => {
+          uniqueCurrentHosts.forEach((curr) => {
+            const key = `${prev}->${curr}`;
+            if (!edgeMap.has(key)) {
+              edgeMap.set(key, []);
+            }
+            edgeMap.get(key).push(chunkLabel);
           });
-        }
-        prevHosts = uniqueCurr;
+        });
+
+        prevHosts = uniqueCurrentHosts;
       } else {
         prevHosts = [];
       }
+    });
+
+    // Convert aggregated map to edges
+    edgeMap.forEach((chunks, key) => {
+      const [from, to] = key.split("->");
+
+      // Summarize label if too long
+      let label = "";
+      if (chunks.length <= 3) {
+        label = chunks.join(", ");
+      } else {
+        const first = chunks[0];
+        const last = chunks[chunks.length - 1];
+        label = `${first}..${last} (${chunks.length})`;
+      }
+
+      edges.push({
+        from: from,
+        to: to,
+        label: label,
+        arrows: "to",
+        color: "#2196F3",
+        font: { align: "horizontal", size: 10, background: "white" },
+      });
     });
 
     const container = document.getElementById("dist-graph");
@@ -220,8 +251,9 @@ async function showDistributionGraph(identifier, isPublic = false) {
 
     const options = {
       layout: {
+        hierarchical: false,
         improvedLayout: true,
-        randomSeed: 2, // Deterministic layout
+        randomSeed: 2,
       },
       physics: {
         enabled: true,
@@ -231,17 +263,27 @@ async function showDistributionGraph(identifier, isPublic = false) {
           centralGravity: 0.3,
           springLength: 200,
           springConstant: 0.04,
-          damping: 0.09,
+          damping: 0.5,
           avoidOverlap: 0.5,
         },
         stabilization: {
-          iterations: 1000,
+          enabled: true,
+          iterations: 100, // Reduced iterations from 1000 to prevent freezing
+          updateInterval: 50,
+          fit: true,
         },
       },
       edges: {
         smooth: {
-          type: "continuous",
+          type: "dynamic", // Allow curving for multiple edges
+          forceDirection: "none",
+          roundness: 0.5,
         },
+      },
+      interaction: {
+        dragNodes: true,
+        zoomView: true,
+        dragView: true,
       },
     };
 

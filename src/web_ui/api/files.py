@@ -321,7 +321,7 @@ async def get_manifest_detail(request):
 
 async def get_manifest_by_id(request):
     manifest_id = request.match_info['id']
-    peers = await scan_network()
+    peers = await get_active_peers()
     if not peers:
         peers = ['http://127.0.0.1:8000',
                  'http://127.0.0.1:8001', 'http://127.0.0.1:8002']
@@ -364,11 +364,17 @@ async def get_manifest_by_id(request):
 
     if active_peers:
         async with aiohttp.ClientSession() as session:
-            chunk_tasks = []
-            for chunk in data['chunks']:
-                chunk_tasks.append(check_chunk_task(
-                    session, chunk['id'], active_peers))
+            # Use a semaphore to prevent flooding the network/event loop
+            # Check 10 chunks at a time (each chunk checks N peers)
+            sem = asyncio.Semaphore(10)
+
+            async def bounded_check(chunk):
+                async with sem:
+                    return await check_chunk_task(session, chunk['id'], active_peers)
+
+            chunk_tasks = [bounded_check(chunk) for chunk in data['chunks']]
             results = await asyncio.gather(*chunk_tasks)
+
             lookup = {cid: locs for cid, locs in results}
             for chunk in data['chunks']:
                 chunk['locations'] = lookup.get(chunk['id'], [])
