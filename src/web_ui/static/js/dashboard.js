@@ -536,7 +536,7 @@ function uploadFile(file) {
                 }
 
                 loadManifests(); // Update local manifests
-                loadCatalog();   // Update public catalog
+                loadCatalog(); // Update public catalog
 
                 // Auto-hide after 5 seconds
                 setTimeout(() => {
