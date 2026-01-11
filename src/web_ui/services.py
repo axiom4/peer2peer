@@ -7,29 +7,30 @@ import aiohttp
 from typing import Optional, List
 
 from .deps import (
-    scan_network, 
-    RemoteHttpNode, 
-    CatalogClient, 
-    DirectoryNode, 
+    scan_network,
+    RemoteHttpNode,
+    CatalogClient,
+    DirectoryNode,
     FilesystemManager
 )
 from .state import (
-    NODE_CACHE, 
-    PEER_CACHE, 
-    LAST_PEER_SCAN, 
-    PEER_SCAN_LOCK, 
-    CACHE_TTL, 
-    WEB_UI_NODE_ID, 
-    CACHED_ROOT_ID, 
+    NODE_CACHE,
+    PEER_CACHE,
+    LAST_PEER_SCAN,
+    PEER_SCAN_LOCK,
+    CACHE_TTL,
+    WEB_UI_NODE_ID,
+    CACHED_ROOT_ID,
     FS_ROOT_KEY,
     FS_LOCK,
     FS_MANAGER
 )
 
+
 async def get_active_peers():
     """Returns a list of cached peers or performs a scan if cache is stale."""
     # Note: We need to modify global variables here, so we access them from the state module
-    # or assume state module objects are mutable. 
+    # or assume state module objects are mutable.
     # Since simple types (int, float) are immutable, we might need a state manager class or `state.LAST_PEER_SCAN` syntax if imported as module.
     # However, importing variables directly means we have local copies if they are immutable.
     # To fix this, we should access them via the module namespace.
@@ -52,10 +53,12 @@ async def get_active_peers():
             print(f"Peer scan failed: {e}")
             return list(state.PEER_CACHE)
 
+
 async def get_dht_nodes(count=5):
     """Returns a deterministic list of RemoteHttpNodes for metadata consistency."""
     stable_peers = [f"http://127.0.0.1:{8000+i}" for i in range(20)]
     return [RemoteHttpNode(u) for u in stable_peers[:count]]
+
 
 async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
     # Check local cache first (Read-Your-Writes)
@@ -99,6 +102,7 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
                     pass
     return None
 
+
 async def fs_store_node_fn(node: DirectoryNode) -> str:
     gateways = await get_dht_nodes(5)
     node_hash = node.get_hash()
@@ -130,6 +134,7 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
 
     return node_hash
 
+
 async def fs_get_root_id() -> Optional[str]:
     from . import state
     if state.CACHED_ROOT_ID:
@@ -150,6 +155,7 @@ async def fs_get_root_id() -> Optional[str]:
             except Exception:
                 pass
     return None
+
 
 async def fs_set_root_id(new_root_id: str):
     from . import state
@@ -176,7 +182,9 @@ async def fs_set_root_id(new_root_id: str):
         await asyncio.gather(*[_pusher(g) for g in gateways])
 
     if success_count == 0:
-        print(f"Warning: Failed to update FS Root ID {FS_ROOT_KEY} on any node.")
+        print(
+            f"Warning: Failed to update FS Root ID {FS_ROOT_KEY} on any node.")
+
 
 async def check_chunk_task(session, chunk_id, peers):
     """
@@ -184,7 +192,7 @@ async def check_chunk_task(session, chunk_id, peers):
     Executes HEAD requests in parallel for each known peer.
     """
     locations = []
-    peer_list = list(peers)  
+    peer_list = list(peers)
 
     async def sub_check(p):
         try:

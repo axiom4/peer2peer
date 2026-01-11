@@ -9,9 +9,10 @@ from .api.files import (
 )
 from .api.network import fetch_catalog, get_network_graph
 from .api.filesystem import (
-    handle_fs_ls, handle_fs_mkdir, handle_fs_add_file, 
+    handle_fs_ls, handle_fs_mkdir, handle_fs_add_file,
     handle_fs_delete, handle_fs_move
 )
+
 
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
@@ -44,13 +45,14 @@ def start_web_server(port=8888):
         web.post('/api/fs/delete', handle_fs_delete),
         web.post('/api/fs/move', handle_fs_move),
         web.static('/downloads', 'downloads'),
-        # Serve static assets if any (js, css inside static folder if needed, 
+        # Serve static assets if any (js, css inside static folder if needed,
         # currently html is served by views, but if html references other files...)
-        # We might need to expose static folder if we had css/js files there. 
+        # We might need to expose static folder if we had css/js files there.
         # But for now the htmls are standalone or use CDNs/inline.
     ])
     print(f"Web UI available at http://localhost:{port}")
     web.run_app(app, port=port)
+
 
 if __name__ == '__main__':
     start_web_server()

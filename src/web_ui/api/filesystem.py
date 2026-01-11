@@ -14,6 +14,7 @@ from ..services import (
 )
 from .files import _delete_file_from_network
 
+
 async def handle_fs_ls(request):
     """
     GET /api/fs/ls?path=/foo/bar
@@ -166,6 +167,7 @@ async def handle_fs_add_file(request):
         except Exception as e:
             print(f"Error adding file to FS: {e}")
             return web.json_response({"error": str(e)}, status=500)
+
 
 async def _recursive_collect_manifests(node_id):
     """

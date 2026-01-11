@@ -4,6 +4,7 @@ from ..deps import scan_network, CatalogClient, RemoteHttpNode
 from ..services import get_active_peers
 import asyncio
 
+
 async def fetch_catalog(request):
     """
     Fetches the global public catalog from the network.
@@ -30,6 +31,7 @@ async def fetch_catalog(request):
     except Exception as e:
         print(f"Catalog fetch error: {e}")
         return web.json_response({"error": str(e)}, status=500)
+
 
 async def get_network_graph(request):
     try:
