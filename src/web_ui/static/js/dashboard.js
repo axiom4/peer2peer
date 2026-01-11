@@ -396,166 +396,220 @@ async function repairFile(manifestName) {
 }
 
 // --- Upload ---
-document.addEventListener("DOMContentLoaded", function () {
-  const uploadForm = document.getElementById("uploadForm");
-  if (uploadForm) {
-    uploadForm.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const input = document.getElementById("fileInput");
-      if (!input.files[0]) return;
 
-      const file = input.files[0];
-      const replicas = document.getElementById("replicasInput").value || 5;
-      const compression = document.getElementById("compressionCheck").checked;
+function triggerUpload() {
+  document.getElementById("fileInput").click();
+}
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("redundancy", replicas);
-      formData.append("compression", compression);
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) {
+    uploadFile(file);
+  }
+  // Reset so same file can be selected again
+  event.target.value = "";
+}
 
-      const statusDiv = document.getElementById("uploadStatus");
-      // Reset status with a progress bar
-      statusDiv.innerHTML = `
+function handleDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.add("bg-secondary", "bg-opacity-10", "border-primary");
+}
+
+function handleDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove("bg-secondary", "bg-opacity-10", "border-primary");
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove("bg-secondary", "bg-opacity-10", "border-primary");
+
+  const dt = event.dataTransfer;
+  const files = dt.files;
+
+  if (files.length > 0) {
+    uploadFile(files[0]);
+  }
+}
+
+function uploadFile(file) {
+  const replicas = document.getElementById("replicasInput").value || 5;
+  const compression = document.getElementById("compressionCheck").checked;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("redundancy", replicas);
+  formData.append("compression", compression);
+
+  const statusDiv = document.getElementById("uploadStatus");
+  statusDiv.classList.add("active");
+  // Reset status with a progress bar
+  statusDiv.innerHTML = `
         <div class="progress mb-2" style="height: 25px;">
             <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
         </div>
         <div id="statusText" class="text-muted small">Starting upload...</div>
     `;
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/upload", true);
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/upload", true);
 
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
+  xhr.upload.onprogress = (event) => {
+    if (event.lengthComputable) {
+      const percent = Math.round((event.loaded / event.total) * 100);
+      const progressBar = document.getElementById("progressBar");
+      const statusText = document.getElementById("statusText");
+
+      // UX: Map Upload (0-100%) to first 40% of total progress bar
+      // This reserves 60% for the server-side distribution/processing
+      const visualPercent = Math.round(percent * 0.4);
+
+      if (progressBar) {
+        progressBar.style.width = visualPercent + "%";
+        progressBar.innerText = visualPercent + "%";
+        progressBar.setAttribute("aria-valuenow", visualPercent);
+      }
+
+      if (statusText) {
+        if (percent < 100) {
+          statusText.innerText = `Uploading: ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
+        } else {
+          statusText.innerText = "Upload complete. Sending to server...";
+        }
+      }
+    }
+  };
+
+  xhr.onload = () => {
+    if (xhr.status === 200) {
+      try {
+        const result = JSON.parse(xhr.responseText);
+
+        if (result.status === "processing" && result.task_id) {
+          // Start polling for progress
+          const taskId = result.task_id;
           const progressBar = document.getElementById("progressBar");
           const statusText = document.getElementById("statusText");
 
-          // UX: Map Upload (0-100%) to first 40% of total progress bar
-          // This reserves 60% for the server-side distribution/processing
-          const visualPercent = Math.round(percent * 0.4);
-
+          // Switch visual style to indicate phase change
           if (progressBar) {
-            progressBar.style.width = visualPercent + "%";
-            progressBar.innerText = visualPercent + "%";
-            progressBar.setAttribute("aria-valuenow", visualPercent);
+            progressBar.classList.remove("bg-primary");
+            progressBar.classList.add("bg-success", "progress-bar-striped", "progress-bar-animated");
           }
 
-          if (statusText) {
-            if (percent < 100) {
-              statusText.innerText = `Uploading: ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
-            } else {
-              statusText.innerText = "Upload complete. Sending to server...";
-            }
-          }
-        }
-      };
+          const pollInterval = setInterval(async () => {
+            try {
+              const res = await fetch(`/api/progress/${taskId}`);
+              const task = await res.json();
 
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const result = JSON.parse(xhr.responseText);
+              if (task.status === "completed") {
+                clearInterval(pollInterval);
 
-            if (result.status === "processing" && result.task_id) {
-              // Start polling for progress
-              const taskId = result.task_id;
-              const progressBar = document.getElementById("progressBar");
-              const statusText = document.getElementById("statusText");
+                // Make sure bar is at 100%
+                if (progressBar) {
+                  progressBar.style.width = "100%";
+                  progressBar.innerText = "100%";
+                  progressBar.setAttribute("aria-valuenow", 100);
+                  progressBar.classList.remove("progress-bar-animated");
+                }
+                if (statusText) {
+                  statusText.className = "text-success fw-bold";
+                  // Use the backend message which contains the ID
+                  statusText.innerText = task.message;
+                }
 
-              // Switch visual style to indicate phase change
-              if (progressBar) {
-                progressBar.classList.remove("bg-primary");
-                progressBar.classList.add("bg-success", "progress-bar-striped", "progress-bar-animated");
-              }
-
-              const pollInterval = setInterval(async () => {
-                try {
-                  const res = await fetch(`/api/progress/${taskId}`);
-                  const task = await res.json();
-
-                  if (task.status === "completed") {
-                    clearInterval(pollInterval);
-
-                    // Make sure bar is at 100%
-                    if (progressBar) {
-                      progressBar.style.width = "100%";
-                      progressBar.innerText = "100%";
-                      progressBar.setAttribute("aria-valuenow", 100);
-                      progressBar.classList.remove("progress-bar-animated");
-                    }
-                    if (statusText) {
-                      statusText.className = "text-success fw-bold";
-                      // Use the backend message which contains the ID
-                      statusText.innerText = task.message;
-                    }
-
-                    // Try to extract Manifest ID for better visibility
-                    const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
-                    if (match && match[1]) {
-                      const manifestId = match[1];
-                      const alertHtml = `
+                // Try to extract Manifest ID for better visibility
+                const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
+                if (match && match[1]) {
+                  const manifestId = match[1];
+                  const alertHtml = `
                             <div class="alert alert-success mt-2">
                                 <strong>Build Success!</strong><br>
                                 Manifest ID: <code class="user-select-all">${manifestId}</code><br>
                                 <small class="text-muted">(Share this ID for direct download)</small>
                             </div>
                          `;
-                      statusDiv.innerHTML += alertHtml;
-                    }
-
-                    loadManifests();
-
-                    // Auto-hide after 3 seconds
-                    setTimeout(() => {
-                      statusDiv.innerHTML = "";
-                    }, 3000);
-                  } else if (task.status === "error") {
-                    clearInterval(pollInterval);
-                    statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
-                  } else {
-                    // Update progress
-                    if (progressBar) {
-                      let p = task.percent;
-                      // Map Distribution (0-100%) to remaining 60% of total bar (40 -> 100)
-                      let visualP = 40 + Math.round(p * 0.6);
-
-                      progressBar.style.width = visualP + "%";
-                      progressBar.innerText = visualP + "%";
-                      progressBar.setAttribute("aria-valuenow", visualP);
-                    }
-                    if (statusText) {
-                      statusText.innerText = task.message;
-                    }
-                  }
-                } catch (e) {
-                  console.error("Polling error", e);
+                  statusDiv.innerHTML += alertHtml;
                 }
-              }, 500);
-            } else if (result.status === "ok") {
-              statusDiv.innerHTML = `<div class="alert alert-success">${result.message}</div>`;
-              loadManifests(); // Refresh list
-            } else {
-              statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
+
+                loadManifests();
+
+                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                  statusDiv.classList.remove("active");
+                  statusDiv.innerHTML = "";
+                }, 5000);
+              } else if (task.status === "error") {
+                clearInterval(pollInterval);
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${task.message}</div>`;
+              } else {
+                // Update progress
+                if (progressBar) {
+                  let p = task.percent;
+                  // Map Distribution (0-100%) to remaining 60% of total bar (40 -> 100)
+                  let visualP = 40 + Math.round(p * 0.6);
+
+                  progressBar.style.width = visualP + "%";
+                  progressBar.innerText = visualP + "%";
+                  progressBar.setAttribute("aria-valuenow", visualP);
+                }
+                if (statusText) {
+                  statusText.innerText = task.message;
+                }
+              }
+            } catch (e) {
+              console.error("Polling error", e);
             }
-          } catch (e) {
-            statusDiv.innerHTML = `<div class="alert alert-danger">Invalid server response</div>`;
-          }
+          }, 500);
+        } else if (result.status === "ok") {
+          statusDiv.innerHTML = `<div class="alert alert-success">${result.message}</div>`;
+          loadCatalog(); // Refresh catalog
         } else {
-          statusDiv.innerHTML = `<div class="alert alert-danger">Upload Failed (Status ${xhr.status})</div>`;
+          statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.message}</div>`;
         }
-      };
+      } catch (e) {
+        statusDiv.innerHTML = `<div class="alert alert-danger">Invalid server response</div>`;
+      }
+    } else {
+      statusDiv.innerHTML = `<div class="alert alert-danger">Upload Failed (Status ${xhr.status})</div>`;
+    }
+  };
 
-      xhr.onerror = () => {
-        statusDiv.innerHTML = `<div class="alert alert-danger">Network Error during upload</div>`;
-      };
+  xhr.onerror = () => {
+    statusDiv.innerHTML = `<div class="alert alert-danger">Network Error during upload</div>`;
+  };
 
-      xhr.send(formData);
-    });
-  }
+  xhr.send(formData);
+}
 
+document.addEventListener("DOMContentLoaded", function () {
   console.log("Initializing Dashboard...");
   loadCatalog();
 });
 
 // Refresh catalog periodically
 setInterval(loadCatalog, 30000);
+
+function filterCatalog() {
+  const input = document.getElementById("searchCatalog");
+  const filter = input.value.toLowerCase();
+  const tbody = document.getElementById("catalogList");
+  const tr = tbody.getElementsByTagName("tr");
+
+  for (let i = 0; i < tr.length; i++) {
+    const tdName = tr[i].getElementsByTagName("td")[0];
+    const tdId = tr[i].getElementsByTagName("td")[1];
+    if (tdName || tdId) {
+      const txtName = tdName.textContent || tdName.innerText;
+      const txtId = tdId.textContent || tdId.innerText;
+      if (txtName.toLowerCase().indexOf(filter) > -1 || txtId.toLowerCase().indexOf(filter) > -1) {
+        tr[i].style.display = "";
+      } else {
+        tr[i].style.display = "none";
+      }
+    }
+  }
+}

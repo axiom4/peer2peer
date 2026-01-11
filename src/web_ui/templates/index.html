@@ -49,8 +49,6 @@
             </div>
           </div>
 
-          <!-- Upload Status -->
-          <div id="uploadStatus" class="mt-auto"></div>
         </div>
       </div>
     </div>
@@ -69,9 +67,19 @@
           <input type="text" id="searchCatalog" class="form-control border-start-0 ps-0" placeholder="Search files..." onkeyup="filterCatalog()" />
         </div>
         <div class="flex-grow-1 overflow-auto custom-scrollbar">
-          <ul class="list-group list-group-flush" id="manifestList">
-            <!-- Items -->
-          </ul>
+          <table class="table table-hover table-sm mb-0 align-middle">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>Name</th>
+                <th style="width: 100px;">ID</th>
+                <th style="width: 80px;">Size</th>
+                <th style="width: 120px;" class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="catalogList">
+              <!-- Load from API -->
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -92,6 +100,10 @@
     </div>
   </div>
 </div>
+
+<!-- Upload Status Container (Moved for Fixed Positioning) -->
+<div id="uploadStatus"></div>
+
 {% endblock %} {% block scripts %}
 <script src="/static/js/dashboard.js"></script>
 {% endblock %}
