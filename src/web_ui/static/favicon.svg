@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Connections -->
+  <line x1="50" y1="25" x2="25" y2="75" stroke="#0d6efd" stroke-width="8" stroke-linecap="round" />
+  <line x1="50" y1="25" x2="75" y2="75" stroke="#0d6efd" stroke-width="8" stroke-linecap="round" />
+  <line x1="25" y1="75" x2="75" y2="75" stroke="#0d6efd" stroke-width="8" stroke-linecap="round" />
+  
+  <!-- Nodes -->
+  <circle cx="50" cy="25" r="16" fill="#0d6efd" />
+  <circle cx="25" cy="75" r="16" fill="#0d6efd" />
+  <circle cx="75" cy="75" r="16" fill="#0d6efd" />
+  
+  <!-- Inner Dots -->
+  <circle cx="50" cy="25" r="6" fill="#ffffff" />
+  <circle cx="25" cy="75" r="6" fill="#ffffff" />
+  <circle cx="75" cy="75" r="6" fill="#ffffff" />
+</svg>
