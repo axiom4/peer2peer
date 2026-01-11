@@ -70,7 +70,8 @@ body {
   overflow-wrap: break-word;
 }
 
-#uploadStatus code, #uploadStatus pre {
+#uploadStatus code,
+#uploadStatus pre {
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 0.85em;
