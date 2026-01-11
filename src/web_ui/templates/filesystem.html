@@ -1,63 +1,67 @@
 {% extends "base.html" %} {% block title %}P2P Filesystem{% endblock %} {% block content %}
-<div class="row h-100 g-0 content-row">
+<div class="row g-4 mb-4 content-row">
   <!-- Sidebar Tree View -->
-  <div class="col-md-3 border-end bg-white d-flex flex-column" style="height: 100%; overflow: hidden">
-    <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-      <span class="fw-bold text-secondary">Explorer</span>
-      <button class="btn btn-sm btn-outline-secondary" onclick="refreshTreeRoot()" title="Refresh Tree"><i class="fas fa-sync-alt"></i></button>
-    </div>
-    <div class="flex-grow-1 overflow-auto custom-scrollbar p-2" id="fsTreeRoot">
-      <!-- Tree content populated by JS -->
-      <div class="text-center text-muted mt-3">Loading Tree...</div>
+  <div class="col-md-3 h-100">
+    <div class="card h-100 shadow-sm">
+      <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-sitemap me-2"></i> Explorer</span>
+        <button class="btn btn-sm btn-outline-light" onclick="refreshTreeRoot()" title="Refresh Tree"><i class="fas fa-sync-alt"></i></button>
+      </div>
+      <div class="card-body overflow-auto custom-scrollbar p-2" id="fsTreeRoot">
+        <!-- Tree content populated by JS -->
+        <div class="text-center text-muted mt-3">Loading Tree...</div>
+      </div>
     </div>
   </div>
 
   <!-- Main File View -->
-  <div class="col-md-9 d-flex flex-column" style="height: 100%">
-    <!-- Toolbar -->
-    <div class="d-flex align-items-center justify-content-between p-3 border-bottom bg-white shadow-sm fw-bold">
-      <nav aria-label="breadcrumb">
-        <ol class="breadcrumb mb-0" id="fsBreadcrumbs">
-          <li class="breadcrumb-item active">Root</li>
-        </ol>
-      </nav>
-
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="triggerFsUpload()"><i class="fas fa-cloud-upload-alt me-1"></i> Upload</button>
-        <input type="file" id="fileInput" class="d-none" onchange="handleFileInputChange(event)" />
-        <button class="btn btn-outline-secondary" onclick="promptMkdir()"><i class="fas fa-folder-plus me-1"></i> New Folder</button>
-        <button class="btn btn-outline-secondary" onclick="loadFilesystem(currentFsPath)"><i class="fas fa-sync-alt"></i></button>
-        <span id="fsLoading" class="ms-3 text-primary spinner-border spinner-border-sm" style="display: none"></span>
+  <div class="col-md-9 h-100">
+    <div class="card h-100 shadow-sm d-flex flex-column">
+      <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-folder-open me-2"></i> File Browser</span>
+        <span id="fsLoading" class="spinner-border spinner-border-sm text-light" style="display: none"></span>
       </div>
-    </div>
 
-    <!-- File Drop Area (Entire List) -->
-    <div
-      class="flex-grow-1 overflow-auto bg-light p-3 custom-scrollbar"
-      id="fsCard"
-      ondragover="handleFileDragOver(event)"
-      ondragleave="handleFileDragLeave(event)"
-      ondrop="handleFileDrop(event)"
-    >
-      <div class="card shadow-sm border-0">
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 table-striped">
-              <thead class="bg-light sticky-top" style="z-index: 1">
-                <tr class="text-secondary text-uppercase small">
-                  <th style="width: 50px"></th>
-                  <!-- Icon -->
-                  <th>Name</th>
-                  <th style="width: 100px">Type</th>
-                  <th style="width: 100px">Size</th>
-                  <th style="width: 150px" class="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="fsFileList">
-                <!-- JS Populated -->
-              </tbody>
-            </table>
-          </div>
+      <!-- Toolbar Header (Sub-header) -->
+      <div class="bg-light d-flex align-items-center justify-content-between p-2 border-bottom">
+        <nav aria-label="breadcrumb">
+          <ol class="breadcrumb mb-0 ps-2" id="fsBreadcrumbs">
+            <li class="breadcrumb-item active">Root</li>
+          </ol>
+        </nav>
+
+        <div class="btn-group">
+          <button class="btn btn-sm btn-success text-white" onclick="triggerFsUpload()"><i class="fas fa-cloud-upload-alt me-1"></i> Upload</button>
+          <input type="file" id="fileInput" class="d-none" onchange="handleFileInputChange(event)" />
+          <button class="btn btn-sm btn-outline-secondary bg-white" onclick="promptMkdir()"><i class="fas fa-folder-plus me-1"></i> New Folder</button>
+          <button class="btn btn-sm btn-outline-secondary bg-white" onclick="loadFilesystem(currentFsPath)"><i class="fas fa-sync-alt"></i></button>
+        </div>
+      </div>
+
+      <!-- File List Body (Droppable) -->
+      <div
+        class="card-body p-0 d-flex flex-column flex-grow-1 overflow-hidden"
+        id="fsCard"
+        ondragover="handleFileDragOver(event)"
+        ondragleave="handleFileDragLeave(event)"
+        ondrop="handleFileDrop(event)"
+      >
+        <div class="flex-grow-1 overflow-auto custom-scrollbar">
+          <table class="table table-hover align-middle mb-0 table-striped">
+            <thead class="bg-light sticky-top" style="z-index: 10">
+              <tr class="text-secondary text-uppercase small">
+                <th style="width: 50px" class="ps-3"></th>
+                <!-- Icon -->
+                <th>Name</th>
+                <th style="width: 100px">Type</th>
+                <th style="width: 100px">Size</th>
+                <th style="width: 150px" class="text-end pe-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="fsFileList">
+              <!-- JS Populated -->
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
