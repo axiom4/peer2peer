@@ -105,8 +105,9 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
             if force:
                 print(f"Delete: FORCE mode active for {manifest_id}")
             else:
-                raise Exception(
-                    "Safe Delete Abort: Manifest unavailable. Use force=true to override.")
+                # Warning instead of Abort - Allows cleaning up "ghost" manifests
+                print(f"Delete: Manifest content unavailable. Proceeding with ID removal to clear ghost entry.")
+                # raise Exception("Safe Delete Abort: Manifest unavailable. Use force=true to override.")
 
     broadcast_targets = list(final_peers) if final_peers else []
     local_cluster = [f"http://127.0.0.1:{p}" for p in range(8000, 8020)]
