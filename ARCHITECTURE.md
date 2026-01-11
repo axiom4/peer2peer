@@ -52,7 +52,7 @@ To enable data discovery without sharing the `.manifest` file manually, the Clie
 
 1. **Key Generation**: A deterministic key (e.g., `catalog_global_v1`) is hashed.
 2. **List Append**: The manifest JSON is sent as a `STORE` request to the DHT, but handled as a "List Append" operation rather than a overwrite.
-3. **Persistence**: Nodes holding this key update their local `dht_index.json`, adding the new entry to the list of available files.
+3. **Persistence**: Nodes holding this key update their local `dht_index.sqlite`, adding the new entry to the list of available files.
 
 ---
 
@@ -102,7 +102,7 @@ When a user requests to delete a file:
    - It attempts to parse each entry as JSON to find its `id`.
    - **Condition**: If `entry.id == target_id` OR `entry == target_string`, the item is removed.
    - This handles edge cases like whitespace differences or string/integer type mismatches.
-4. **Persistence**: The updated list is immediately flushed to `dht_index.json`.
+4. **Persistence**: The updated list is immediately flushed to `dht_index.sqlite`.
 
 ### B. Chunk Deletion (Gossip)
 

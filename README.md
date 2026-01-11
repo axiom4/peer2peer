@@ -36,7 +36,7 @@ The system consists of autonomous nodes forming a dynamic mesh network.
 - **Distributed Hash Table (DHT)**:
   - **Routing**: Kademlia-lite implementation for peer discovery.
   - **Storage**: Key-Value store supporting both atomic values and Append-Only Lists (for Catalog).
-  - **Persistence**: Index is saved to `dht_index.json` with robust loading/saving logic.
+  - **Persistence**: Index is saved to `dht_index.sqlite` using SQLite for performance and reliability.
 - **Gossip Protocol**: Used for propagating high-priority events like "Delete Chunk" and "Delete Manifest" to ensure eventual consistency across the mesh.
 - No central database: each node only knows its direct neighbors and DHT routing table.
 

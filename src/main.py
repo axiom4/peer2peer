@@ -232,7 +232,7 @@ def prune_orphans(args=None):
                 continue
 
             # PROTECT DHT INDEX from pruning
-            if chunk_file == 'dht_index.json':
+            if chunk_file.startswith('dht_index'):
                 continue
 
             if chunk_file not in valid_chunks:

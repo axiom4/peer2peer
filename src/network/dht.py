@@ -8,6 +8,8 @@ import logging
 import asyncio
 from typing import List, Tuple, Dict, Optional
 
+from network.storage import DHTStorage
+
 logger = logging.getLogger(__name__)
 
 K_BUCKET_SIZE = 20
@@ -149,12 +151,42 @@ class DHT:
         self.port = port
         self.storage_dir = storage_dir
         self.routing_table = RoutingTable(self.node_id)
-        # chunk_id -> provider_url (Indexing)
-        self.storage: Dict[str, str] = {}
+        
+        # New SQLite Storage
+        self.db_path = os.path.join(storage_dir, "dht_index.sqlite")
+        self.storage = DHTStorage(self.db_path)
+        
+        # One-time migration from old json
+        self._migrate_legacy_db(os.path.join(storage_dir, "dht_index.json"))
 
-        # Re-enable Disk Persistence but with TTL logic handled in logic
-        self.db_path = os.path.join(storage_dir, "dht_index.json")
-        self._load_db()
+    def _migrate_legacy_db(self, json_path: str):
+        if os.path.exists(json_path):
+            logger.info("Migrating legacy dht_index.json to SQLite...")
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                
+                count = 0
+                now = time.time()
+                for k, v in data.items():
+                    # Handle legacy format migration
+                    if k.startswith("catalog_"):
+                        self.storage.set(k, v)
+                        count += 1
+                        continue
+                    
+                    if isinstance(v, str):
+                        # Upgrade old string value to dict format
+                         self.storage.set(k, {'v': v, 'ts': now})
+                         count += 1
+                    elif isinstance(v, dict):
+                         self.storage.set(k, v)
+                         count += 1
+                
+                logger.info(f"Migrated {count} keys. Deleting old dht_index.json.")
+                os.remove(json_path)
+            except Exception as e:
+                logger.error(f"Migration Failed: {e}")
 
     async def start(self):
         """Starts background maintenance tasks."""
@@ -165,104 +197,13 @@ class DHT:
         while True:
             await asyncio.sleep(CLEANUP_INTERVAL)
             try:
-                now = time.time()
-                expired = []
-                # Scan purely for expiration
-                for k, v in list(self.storage.items()):
-                    # Skip Catalog items (lists) which have internal logic or long retention
-                    if k.startswith("catalog_"):
-                        continue
-
-                    # Check Dict format items with timestamp
-                    if isinstance(v, dict) and 'ts' in v:
-                        if now - v['ts'] > DATA_TTL:
-                            expired.append(k)
-
-                if expired:
-                    logger.info(
-                        f"DHT Cleanup: Removing {len(expired)} expired entries.")
-                    for k in expired:
-                        del self.storage[k]
-                    self._save_db()
+                # Use SQL efficient cleanup
+                self.storage.cleanup_expired(DATA_TTL, exclude_prefix="catalog_")
+                logger.debug("DHT Cleanup completed via SQLite")
             except Exception as e:
                 logger.error(f"Error in DHT cleanup loop: {e}")
 
-    def _load_db(self):
-        logger.info(f"Loading DHT DB from {self.db_path}...")
-        if os.path.exists(self.db_path):
-            try:
-                with open(self.db_path, 'r') as f:
-                    data = json.load(f)
 
-                # MIGRATION & SELF-HEALING
-                # 1. Convert old string values to TTL-aware dicts
-                # 2. Validate local files
-
-                new_storage = {}
-                keys_removed = 0
-                now = time.time()
-
-                for key, val in data.items():
-                    # Handle Catalog Lists (preserve as is)
-                    if key.startswith("catalog_"):
-                        new_storage[key] = val
-                        continue
-
-                    # Handle Chunk Records
-                    # Format migration: String -> Dict
-                    if isinstance(val, str):
-                        # It's an old record.
-                        # SELF-HEALING CHECK: If it points to me, does it exist?
-                        if str(self.port) in val and len(key) == 64:
-                            # Direct check
-                            chunk_path = os.path.join(
-                                os.path.dirname(self.db_path), key)
-                            if not os.path.exists(chunk_path):
-                                keys_removed += 1
-                                continue
-
-                        # Upgrade to new format with 'fresh' timestamp so it survives one cycle
-                        new_storage[key] = {'v': val, 'ts': now}
-
-                    elif isinstance(val, dict) and 'v' in val:
-                        # Already new format
-                        # Check expiry? No, strictly load what we have, let cleanup loop handle it.
-
-                        # Still apply Self-Healing for consistency on restart
-                        actual_val = val['v']
-                        if str(self.port) in actual_val and len(key) == 64:
-                            chunk_path = os.path.join(
-                                os.path.dirname(self.db_path), key)
-                            if not os.path.exists(chunk_path):
-                                keys_removed += 1
-                                continue
-
-                        new_storage[key] = val
-                    else:
-                        # Unknown garbage
-                        keys_removed += 1
-
-                self.storage = new_storage
-
-                if keys_removed > 0:
-                    logger.warning(
-                        f"DHT: Pruned {keys_removed} invalid/legacy entries during load.")
-                    self._save_db()
-
-                logger.info(f"Loaded {len(self.storage)} keys from DB.")
-            except Exception as e:
-                logger.error(f"Failed to load DHT DB: {e}")
-                self.storage = {}
-        else:
-            logger.warning(f"DHT DB not found at {self.db_path}")
-
-    def _save_db(self):
-        try:
-            with open(self.db_path, 'w') as f:
-                json.dump(self.storage, f)
-        except Exception as e:
-            logger.error(f"Failed to save DHT DB: {e}")
-        # Note: Local chunks are also implicit storage? No, this is the DHT index.
 
     async def bootstrap(self, peers: List[str]):
         """Join the network via list of peer URLs."""
@@ -310,41 +251,36 @@ class DHT:
     def handle_find_value(self, key_hex: str, sender_info: dict):
         self.handle_ping(sender_info)
 
-        # TTL cleanup on read: Filter out expired items (older than 24h)
-        # Only for catalog items which have timestamps
-        if key_hex.startswith("catalog_") and key_hex in self.storage:
-            items = self.storage[key_hex]
-            if isinstance(items, list):
+        # 1. Check Storage
+        val = self.storage.get(key_hex)
+        
+        if val:
+            # Catalog logic: clean expired entries inside the list
+            if key_hex.startswith("catalog_") and isinstance(val, list):
                 valid_items = []
                 now = time.time()
-                for item in items:
+                for item in val:
                     try:
                         obj = json.loads(item)
-                        # TTL: 15 minutes (900 seconds) for Catalog Freshness
-                        if now - obj.get('ts', 0) < 900:
+                        if now - obj.get('ts', 0) < 900: # 15 min TTL
                             valid_items.append(item)
                     except:
-                        # Keep untimestamped legacy items? No, flush them to enforce consistency
                         pass
+                
+                # Update DB if filtered
+                if len(valid_items) != len(val):
+                    self.storage.set(key_hex, valid_items)
+                    val = valid_items
 
-                # Check for updates
-                if len(valid_items) != len(items):
-                    self.storage[key_hex] = valid_items
-                    self._save_db()  # Sync cleanup to disk
-
-        # If we have the value (location of chunk), return it
-        if key_hex in self.storage:
-            val = self.storage[key_hex]
-            # Unwrap if it's a TTL dict
+            # Return Value
             if isinstance(val, dict) and 'v' in val:
-                return {"value": val['v']}
+                 return {"value": val['v']}
             return {"value": val}
 
-        # Else return k closest nodes
+        # 2. Return Closest Nodes if not found
         try:
             target_id = NodeId.from_hex(key_hex)
         except ValueError:
-            # Handle special keys like "catalog_" by hashing them to get a valid ID
             target_id = NodeId.from_str(key_hex)
 
         closest = self.routing_table.find_k_closest(target_id)
@@ -354,153 +290,101 @@ class DHT:
         self.handle_ping(sender_info)
 
         # CATALOG FEATURE: List Append
-        # If the value is a specific JSON command to append to a list
         if key_hex.startswith("catalog_"):
-            if key_hex not in self.storage:
-                self.storage[key_hex] = []  # Initialize as list
+            current_list = self.storage.get(key_hex, [])
+            if not isinstance(current_list, list):
+                current_list = []
 
-            if isinstance(self.storage[key_hex], list):
-                # IMPROVED MERGE STRATEGY
-                # 1. Parse incoming new value
-                new_id = None
-                try:
-                    new_obj = json.loads(value)
-                    new_id = new_obj.get('id')
-                except:
-                    pass
-
-                # 2. Filter out explicit duplicates (same content) or Same-ID (update ts)
-                cleaned_list = []
-                for existing in self.storage[key_hex]:
-                    keep = True
-                    # If exact match
-                    if existing == value:
-                        keep = False
-                    # If ID match (Update scenario)
-                    elif new_id:
-                        try:
-                            ex_obj = json.loads(existing)
-                            if ex_obj.get('id') == new_id:
-                                keep = False  # Replace old version with new
-                        except:
-                            pass
-
-                    if keep:
-                        cleaned_list.append(existing)
-
-                # 3. Append new value
-                cleaned_list.append(value)
-
-                # 4. Cap size
-                if len(cleaned_list) > 100:  # Increased limit
-                    cleaned_list = cleaned_list[-100:]  # Keep recent
-
-                self.storage[key_hex] = cleaned_list
-
-            self._save_db()
+            # Merge Logic
+            new_id = None
+            try:
+                new_obj = json.loads(value)
+                new_id = new_obj.get('id')
+            except:
+                pass
+            
+            cleaned_list = []
+            for existing in current_list:
+                keep = True
+                if existing == value:
+                    keep = False
+                elif new_id:
+                     try:
+                        ex_obj = json.loads(existing)
+                        if ex_obj.get('id') == new_id:
+                            keep = False
+                     except:
+                         pass
+                if keep:
+                    cleaned_list.append(existing)
+            
+            cleaned_list.append(value)
+            if len(cleaned_list) > 100:
+                cleaned_list = cleaned_list[-100:]
+            
+            self.storage.set(key_hex, cleaned_list)
             return {"status": "ok"}
 
-        # Modern TTL Storage for Chunks
-        # Value is { "v": raw_val, "ts": time.time() }
-        self.storage[key_hex] = {"v": value, "ts": time.time()}
-        self._save_db()
+        # Standard Chunk Storage
+        self.storage.set(key_hex, {"v": value, "ts": time.time()})
         return {"status": "ok"}
 
     def handle_delete(self, key_hex: str, value: str, sender_info: dict):
-        logger.info(
-            f"DHT HANDLE DELETE ENTERED: Key='{key_hex}' Value='{value[:20]}'")
+        logger.debug(f"DHT HANDLE DELETE: Key='{key_hex}'")
         self.handle_ping(sender_info)
 
-        # CATALOG FEATURE: List Remove
         if key_hex.startswith("catalog_"):
-            logger.info(
-                f"DEBUG: Processing DELETE for catalog key {key_hex[:8]}... Value={value[:50]}")
-            if key_hex in self.storage:
-                logger.info(
-                    f"DEBUG: Key found in storage. Count before: {len(self.storage[key_hex])}")
-            else:
-                logger.info(f"DEBUG: Key {key_hex} NOT found in storage.")
-                # logger.info(f"DEBUG: Available keys: {list(self.storage.keys())}") # Use with caution if huge
-
-            if key_hex in self.storage and isinstance(self.storage[key_hex], list):
-                # Safe Parsing Helper
-                def get_id_safe(json_str):
-                    try:
-                        obj = json.loads(json_str)
-                        return obj.get('id') if isinstance(obj, dict) else None
-                    except:
-                        return None
-
-                original_len = len(self.storage[key_hex])
-
-                # Determine Target ID
-                target_id = None
-                try:
-                    obj = json.loads(value)
-                    if isinstance(obj, dict) and 'id' in obj:
-                        target_id = obj['id']
-                except:
-                    # Treat value as the ID itself if not valid JSON
-                    target_id = value
-
-                logger.info(
-                    f"DHT DELETE REQUEST [{self.port}]: Key={key_hex[:8]}... TargetID={target_id}")
-
-                if target_id:
-                    # Filter: Keep items where ID does NOT match AND full string does NOT match
-                    new_list = []
-                    target_id_str = str(target_id).strip()
-
-                    for item in self.storage[key_hex]:
-                        item_id = get_id_safe(item)
-                        item_id_str = str(item_id).strip(
-                        ) if item_id is not None else "None"
-
-                        # Logic: Remove if ID matches OR if exact string matches
-
-                        if item_id_str == target_id_str:
-                            logger.info(
-                                f"  -> REMOVED item by ID match: {target_id_str} (Found: {item_id_str})")
-                            continue
-                        if item == value:
-                            logger.info(f"  -> REMOVED item by String match")
-                            continue
-
-                        # Debug logic for items that are kept to see why
-                        # logger.info(f"  -> Keeping item: {item_id_str} != {target_id_str}")
-                        new_list.append(item)
-
-                    self.storage[key_hex] = new_list
-                else:
-                    # Strict removal if no ID could be discerned
-                    if value in self.storage[key_hex]:
-                        self.storage[key_hex].remove(value)
-                        logger.info(f"  -> Removed exact value match")
-
-                if len(self.storage[key_hex]) != original_len:
-                    self._save_db()
-                    logger.info(
-                        f"  -> Catalog updated. Count: {len(self.storage[key_hex])}")
-                    return {"status": "ok", "removed": True}
-                else:
-                    logger.info(
-                        f"  -> Item not found to remove. (Original: {original_len}, New: {len(self.storage[key_hex])})")
-
+            current_list = self.storage.get(key_hex)
+            if not current_list or not isinstance(current_list, list):
                 return {"status": "not_found", "removed": False}
-
+            
+            original_len = len(current_list)
+            
+            # Helper
+            def get_id_safe(json_str):
+                try:
+                    obj = json.loads(json_str)
+                    return obj.get('id') if isinstance(obj, dict) else None
+                except:
+                    return None
+            
+            target_id = None
+            try:
+                obj = json.loads(value)
+                if isinstance(obj, dict) and 'id' in obj:
+                    target_id = obj['id']
+            except:
+                target_id = value
+            
+            if target_id:
+                new_list = []
+                target_id_str = str(target_id).strip()
+                for item in current_list:
+                     item_id = get_id_safe(item)
+                     item_id_str = str(item_id).strip() if item_id else "None"
+                     
+                     if item_id_str == target_id_str:
+                         continue
+                     if item == value:
+                         continue
+                     new_list.append(item)
+                
+                if len(new_list) != original_len:
+                    self.storage.set(key_hex, new_list)
+                    return {"status": "ok", "removed": True}
+            
+            return {"status": "not_found", "removed": False}
+        
         # Standard Key Deletion
-        if key_hex in self.storage:
-            del self.storage[key_hex]
-            self._save_db()
+        if self.storage.contains(key_hex):
+            self.storage.delete(key_hex)
             return {"status": "ok"}
 
         return {"status": "not_found"}
 
     def delete_local(self, key_hex: str):
-        """Removes a key from local storage directly (used by P2PServer)."""
-        if key_hex in self.storage:
-            del self.storage[key_hex]
-            self._save_db()
+        if self.storage.contains(key_hex):
+            self.storage.delete(key_hex)
             logger.info(f"DHT: Locally deleted key {key_hex}")
             return True
         return False
