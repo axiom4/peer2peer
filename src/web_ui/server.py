@@ -1,5 +1,7 @@
 import os
 import aiohttp
+import aiohttp_jinja2
+import jinja2
 from aiohttp import web
 from .views.pages import handle_index, handle_filesystem, handle_topology
 from .api.files import (
@@ -19,6 +21,11 @@ def start_web_server(port=8888):
     os.makedirs('downloads', exist_ok=True)
 
     app = web.Application()
+
+    # Setup Jinja2 template loader
+    templates_path = os.path.join(os.path.dirname(__file__), 'templates')
+    aiohttp_jinja2.setup(app, loader=jinja2.FileSystemLoader(templates_path))
+
     # Increase client_max_size for large uploads (e.g. 500MB)
     app._client_max_size = 500 * 1024 * 1024
 

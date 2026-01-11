@@ -1,127 +1,97 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>P2P Storage Dashboard</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link href="/static/css/bootstrap.min.css" rel="stylesheet" />
-    <link href="/static/css/all.min.css" rel="stylesheet" />
-    <link href="/static/css/style.css" rel="stylesheet" />
-    <script type="text/javascript" src="/static/js/vis-network.min.js"></script>
-  </head>
-  <body class="bg-light">
-    <div class="container-fluid py-4 px-4 main-container">
-      <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
-        <a href="/" class="d-flex align-items-center text-dark text-decoration-none">
-          <span class="fs-4">P2P Storage System</span>
-        </a>
-        <nav>
-          <a href="/" class="btn btn-primary me-2"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a>
-          <a href="/filesystem" class="btn btn-outline-primary me-2"><i class="fas fa-folder me-1"></i> Filesystem</a>
-          <a href="/topology" class="btn btn-outline-primary"><i class="fas fa-project-diagram me-1"></i> Network Topology</a>
-        </nav>
-      </header>
-
-      <div class="row g-4 mb-4 content-row">
-        <!-- Left Column: Upload & Download (Reduced Width) -->
-        <div class="col-lg-4 d-flex flex-column gap-4 h-100">
-          <div class="scrollable-col">
-            <!-- Download Card -->
-            <div class="card mb-4">
-              <div class="card-header bg-dark text-white"><i class="fas fa-cloud-download-alt me-2"></i> Download from Network</div>
-              <div class="card-body">
-                <div class="input-group">
-                  <input type="text" id="manifestIdInput" class="form-control" placeholder="Enter Manifest Hash ID (64 chars)" aria-label="Manifest Hash" />
-                  <button class="btn btn-primary" type="button" onclick="downloadByManifestId()">Download</button>
-                </div>
-                <div class="form-text">Paste a Manifest ID to fetch the file directly from the network.</div>
-              </div>
-            </div>
-
-            <!-- Upload Card -->
-            <div class="card">
-              <div class="card-header bg-primary text-white"><i class="fas fa-cloud-upload-alt me-2"></i> Upload New File</div>
-              <div class="card-body">
-                <form id="uploadForm">
-                  <div class="mb-3">
-                    <label for="fileInput" class="form-label">Select File</label>
-                    <input class="form-control" type="file" id="fileInput" required />
-                  </div>
-
-                  <div class="row g-2 mb-3">
-                    <div class="col-md-6">
-                      <label for="replicasInput" class="form-label">Replicas (Redundancy)</label>
-                      <input type="number" class="form-control" id="replicasInput" value="5" min="1" max="10" />
-                      <div class="form-text">Copies of each chunk.</div>
-                    </div>
-                    <div class="col-md-6 d-flex align-items-center">
-                      <div class="form-check mt-4">
-                        <input class="form-check-input" type="checkbox" value="" id="compressionCheck" checked />
-                        <label class="form-check-label" for="compressionCheck"> Enable Compression (LZMA) </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button type="submit" class="btn btn-success">Distribute to Network</button>
-                </form>
-                <div id="uploadStatus" class="mt-3"></div>
-              </div>
-            </div>
+{% extends "base.html" %} {% block title %}P2P Storage Dashboard{% endblock %} {% block content %}
+<div class="row g-4 mb-4 content-row">
+  <!-- Left Column: Upload & Download (Reduced Width) -->
+  <div class="col-lg-4 d-flex flex-column gap-4 h-100">
+    <div class="scrollable-col">
+      <!-- Download Card -->
+      <div class="card mb-4">
+        <div class="card-header bg-primary text-white"><i class="fas fa-download me-2"></i> Download File</div>
+        <div class="card-body">
+          <div class="input-group mb-3">
+            <input type="text" id="manifestIdInput" class="form-control font-monospace" placeholder="Manifest Hash (64 chars)" />
+            <button class="btn btn-primary" type="button" onclick="downloadByManifestId()">Download</button>
           </div>
-          <!-- End scrollable-col -->
-        </div>
-
-        <!-- Right Column: Catalog (Expanded Width) -->
-        <div class="col-lg-8 d-flex flex-column gap-4 h-100">
-          <!-- Public Catalog Card -->
-          <div class="card h-100-card">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-              <span><i class="fas fa-globe me-2"></i> Public Network Catalog</span>
-              <button class="btn btn-sm btn-outline-light" onclick="loadCatalog()">Refresh</button>
-            </div>
-            <div class="card-body p-0 d-flex flex-column" style="min-height: 0">
-              <div class="table-responsive flex-grow-1">
-                <table class="table table-striped table-hover mb-0">
-                  <thead class="table-light">
-                    <tr>
-                      <th>Filename</th>
-                      <th>Manifest ID</th>
-                      <th>Size</th>
-                      <th style="width: 200px; min-width: 200px">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="catalogList">
-                    <tr>
-                      <td colspan="4" class="text-center text-muted py-3">Click Refresh to discover files...</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <small class="text-muted">Enter a valid Manifest ID to retrieve a file from the network.</small>
         </div>
       </div>
 
-      <!-- Modal for Distribution Graph -->
-      <div class="modal fade" id="distModal" tabindex="-1">
-        <div class="modal-dialog modal-xl">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title">File Distribution Map</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <!-- Upload Card -->
+      <div class="card flex-grow-1 d-flex flex-column">
+        <div class="card-header bg-success text-white"><i class="fas fa-upload me-2"></i> Upload File</div>
+        <div class="card-body d-flex flex-column">
+          <div
+            class="flex-grow-1 border-2 border-dashed border-success rounded d-flex flex-column justify-content-center align-items-center p-4 mb-3"
+            id="dropZone"
+            ondrop="handleDrop(event)"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            style="background-color: #f8fff9; cursor: pointer"
+            onclick="triggerUpload()"
+          >
+            <i class="fas fa-cloud-upload-alt fa-3x text-success mb-3"></i>
+            <p class="mb-0 text-center fw-bold">Drag & Drop files here</p>
+            <p class="text-muted small">or click to browse</p>
+            <input type="file" id="fileInput" class="d-none" onchange="handleFileSelect(event)" />
+          </div>
+
+          <!-- Config -->
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label small">Replicas</label>
+              <input type="number" id="replicasInput" class="form-control form-control-sm" value="5" min="1" max="10" />
             </div>
-            <div class="modal-body">
-              <div id="dist-graph" style="width: 100%; height: 500px; border: 1px solid #ddd"></div>
+            <div class="col-6">
+              <label class="form-label small">Compression</label>
+              <div class="form-check form-switch mt-1">
+                <input class="form-check-input" type="checkbox" id="compressionCheck" checked />
+                <label class="form-check-label small" for="compressionCheck">Lzma</label>
+              </div>
             </div>
           </div>
+
+          <!-- Upload Status -->
+          <div id="uploadStatus" class="mt-auto"></div>
         </div>
       </div>
-
-      <footer class="pt-3 mt-4 text-muted border-top">&copy; 2026 P2P Storage System</footer>
     </div>
-    <script src="/static/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/common.js"></script>
-    <script src="/static/js/dashboard.js"></script>
-  </body>
-</html>
+  </div>
+
+  <!-- Right Column: Catalog (Expanded Width) -->
+  <div class="col-lg-8 d-flex flex-column h-100">
+    <div class="card h-100 d-flex flex-column">
+      <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-shrink-0">
+        <span><i class="fas fa-database me-2"></i> Public Catalog</span>
+        <button class="btn btn-sm btn-outline-light" onclick="loadCatalog()"><i class="fas fa-sync-alt"></i></button>
+      </div>
+      <div class="card-body p-0 d-flex flex-column position-relative" style="overflow: hidden">
+        <div class="input-group p-2 border-bottom flex-shrink-0 bg-white">
+          <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+          <input type="text" id="searchCatalog" class="form-control border-start-0 ps-0" placeholder="Search files..." onkeyup="filterCatalog()" />
+        </div>
+        <div class="flex-grow-1 overflow-auto custom-scrollbar">
+          <ul class="list-group list-group-flush" id="manifestList">
+            <!-- Items -->
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal for Distribution Graph -->
+<div class="modal fade" id="distModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content" style="height: 80vh">
+      <div class="modal-header">
+        <h5 class="modal-title">File Distribution Map</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0 bg-light position-relative">
+        <div id="dist-graph" style="width: 100%; height: 100%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

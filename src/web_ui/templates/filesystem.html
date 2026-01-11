@@ -1,114 +1,94 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>P2P Filesystem</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link href="/static/css/bootstrap.min.css" rel="stylesheet" />
-    <link href="/static/css/all.min.css" rel="stylesheet" />
-    <link href="/static/css/style.css" rel="stylesheet" />
-    <script type="text/javascript" src="/static/js/vis-network.min.js"></script>
-  </head>
-  <body class="bg-light">
-    <div class="container-fluid py-4 px-4 main-container" style="height: 100%; display: flex; flex-direction: column">
-      <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center flex-shrink-0">
-        <a href="/" class="d-flex align-items-center text-dark text-decoration-none">
-          <span class="fs-4">P2P Storage System</span>
-        </a>
-        <nav>
-          <a href="/" class="btn btn-outline-primary me-2"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a>
-          <a href="/filesystem" class="btn btn-primary me-2"><i class="fas fa-folder me-1"></i> Filesystem</a>
-          <a href="/topology" class="btn btn-outline-primary"><i class="fas fa-project-diagram me-1"></i> Network Topology</a>
-        </nav>
-      </header>
-
-      <!-- Hidden inputs for upload logic -->
-      <input type="file" id="fileInput" style="display: none" onchange="handleFileInputChange(event)" />
-      <!-- Defaults for drag-drop upload -->
-      <input type="hidden" id="replicasInput" value="5" />
-      <input type="checkbox" id="compressionCheck" checked style="display: none" />
-
-      <!-- Upload Status Container (Floating) -->
-      <div id="uploadStatus"></div>
-
-      <div class="row g-4 mb-4 flex-grow-1" style="min-height: 0">
-        <!-- Left Column: Navigation Tree -->
-        <div class="col-lg-3 d-flex flex-column h-100">
-          <div class="card h-100 d-flex flex-column">
-            <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
-              <span><i class="fas fa-sitemap me-2 text-secondary"></i> Allowed Folders</span>
-              <button class="btn btn-sm btn-outline-primary" onclick="promptMkdir()" title="New Folder"><i class="fas fa-folder-plus"></i></button>
-            </div>
-            <div class="card-body p-2" style="overflow-y: auto">
-              <div id="fsTreeRoot">
-                <!-- Tree will be injected here -->
-                <div class="d-flex align-items-center tree-item" onclick="loadFilesystem('/')"><i class="fas fa-hdd text-secondary me-2"></i> Root</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Column: File Browser -->
-        <div class="col-lg-9 d-flex flex-column h-100">
-          <div class="card h-100 d-flex flex-column" id="fsCard" ondragover="handleFileDragOver(event)" ondragleave="handleFileDragLeave(event)" ondrop="handleFileDrop(event)">
-            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center flex-shrink-0">
-              <span>📂 Decentralized Filesystem</span>
-              <div>
-                <i id="fsLoading" class="fas fa-sync fa-spin text-white me-2" style="display: none"></i>
-                <button class="btn btn-sm btn-light me-1" onclick="promptMkdir()"><i class="fas fa-folder-plus"></i> New Folder</button>
-                <button class="btn btn-sm btn-light" onclick="triggerFsUpload()"><i class="fas fa-upload"></i> Upload Here</button>
-              </div>
-            </div>
-            <div class="card-body bg-white d-flex flex-column p-0" style="min-height: 0">
-              <nav aria-label="breadcrumb" class="p-3 pb-0">
-                <ol class="breadcrumb bg-light p-2 rounded mb-2" id="fsBreadcrumbs">
-                  <li class="breadcrumb-item active" aria-current="page">/</li>
-                </ol>
-              </nav>
-              <div class="table-responsive flex-grow-1">
-                <table class="table table-hover align-middle mb-0">
-                  <thead class="table-light sticky-top">
-                    <tr>
-                      <th style="width: 40px"></th>
-                      <th>Name</th>
-                      <th style="width: 100px">Type</th>
-                      <th style="width: 100px">Size</th>
-                      <th style="width: 150px">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="fsFileList">
-                    <tr>
-                      <td colspan="5" class="text-center text-muted">Loading filesystem...</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div class="card-footer text-muted small flex-shrink-0">Drag and drop files to move them to subfolders. Drop a local file to upload it here.</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Modal for Distribution Graph -->
-      <div class="modal fade" id="distModal" tabindex="-1">
-        <div class="modal-dialog modal-xl">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title">File Distribution Map</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-              <div id="dist-graph" style="width: 100%; height: 500px; border: 1px solid #ddd"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <footer class="pt-3 mt-4 text-muted border-top">&copy; 2026 P2P Storage System</footer>
+{% extends "base.html" %} {% block title %}P2P Filesystem{% endblock %} {% block content %}
+<div class="row h-100 g-0 content-row">
+  <!-- Sidebar Tree View -->
+  <div class="col-md-3 border-end bg-white d-flex flex-column" style="height: 100%; overflow: hidden">
+    <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+      <span class="fw-bold text-secondary">Explorer</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="refreshTreeRoot()" title="Refresh Tree"><i class="fas fa-sync-alt"></i></button>
     </div>
-    <script src="/static/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/common.js"></script>
-    <script src="/static/js/filesystem.js"></script>
-  </body>
-</html>
+    <div class="flex-grow-1 overflow-auto custom-scrollbar p-2" id="fsTreeRoot">
+      <!-- Tree content populated by JS -->
+      <div class="text-center text-muted mt-3">Loading Tree...</div>
+    </div>
+  </div>
+
+  <!-- Main File View -->
+  <div class="col-md-9 d-flex flex-column" style="height: 100%">
+    <!-- Toolbar -->
+    <div class="d-flex align-items-center justify-content-between p-3 border-bottom bg-white shadow-sm fw-bold">
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0" id="fsBreadcrumbs">
+          <li class="breadcrumb-item active">Root</li>
+        </ol>
+      </nav>
+
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="triggerFsUpload()"><i class="fas fa-cloud-upload-alt me-1"></i> Upload</button>
+        <input type="file" id="fileInput" class="d-none" onchange="handleFileInputChange(event)" />
+        <button class="btn btn-outline-secondary" onclick="promptMkdir()"><i class="fas fa-folder-plus me-1"></i> New Folder</button>
+        <button class="btn btn-outline-secondary" onclick="loadFilesystem(currentFsPath)"><i class="fas fa-sync-alt"></i></button>
+        <span id="fsLoading" class="ms-3 text-primary spinner-border spinner-border-sm" style="display: none"></span>
+      </div>
+    </div>
+
+    <!-- File Drop Area (Entire List) -->
+    <div
+      class="flex-grow-1 overflow-auto bg-light p-3 custom-scrollbar"
+      id="fsCard"
+      ondragover="handleFileDragOver(event)"
+      ondragleave="handleFileDragLeave(event)"
+      ondrop="handleFileDrop(event)"
+    >
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-striped">
+              <thead class="bg-light sticky-top" style="z-index: 1">
+                <tr class="text-secondary text-uppercase small">
+                  <th style="width: 50px"></th>
+                  <!-- Icon -->
+                  <th>Name</th>
+                  <th style="width: 100px">Type</th>
+                  <th style="width: 100px">Size</th>
+                  <th style="width: 150px" class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="fsFileList">
+                <!-- JS Populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Config Hidden for Uploads (Defaults) -->
+<div class="d-none">
+  <input type="number" id="replicasInput" value="5" />
+  <input type="checkbox" id="compressionCheck" checked />
+</div>
+
+<!-- Global Upload Status Toast -->
+<div id="uploadStatus" class="position-fixed bottom-0 end-0 m-3 p-3 bg-white border rounded shadow" style="display: none; width: 300px; z-index: 2000">
+  <!-- Injected by JS -->
+</div>
+
+<!-- Modal for Distribution Graph -->
+<div class="modal fade" id="distModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content" style="height: 80vh">
+      <div class="modal-header">
+        <h5 class="modal-title">File Chunk Map</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0 bg-light position-relative">
+        <div id="dist-graph" style="width: 100%; height: 100%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script src="/static/js/filesystem.js"></script>
+{% endblock %}
