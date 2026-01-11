@@ -85,7 +85,7 @@ class P2PServer:
             val = raw_val
             if isinstance(raw_val, dict) and 'v' in raw_val:
                 val = raw_val['v']
-                
+
             return web.json_response({"value": val})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -203,7 +203,7 @@ class P2PServer:
     async def start(self):
         # Start UDP Discovery
         self.discovery.start()
-        
+
         # Start DHT maintenance
         await self.dht.start()
 
@@ -221,7 +221,7 @@ class P2PServer:
         # Announce local chunks to DHT
         # Start Periodic Re-announcement Loop instead of one-shot
         asyncio.create_task(self._announce_loop())
-        
+
         # Start Catalog Re-Publish Loop (Self-Consistency)
         asyncio.create_task(self._republish_catalog_loop())
 
@@ -231,39 +231,40 @@ class P2PServer:
         # Keep alive
         while True:
             await asyncio.sleep(3600)
-    
+
     async def _republish_catalog_loop(self):
         """
         Periodically scans local chunks to identify hidden Manifests (Catalog Mining)
         and re-publishes them to the public Catalog so they don't expire.
         """
         import hashlib
-        
+
         # Hardcoded Key Logic matching main.py CatalogClient
         CATALOG_BASE_KEY = hashlib.sha256(b"catalog_global_v1").hexdigest()
         DHT_CATALOG_KEY = "catalog_" + CATALOG_BASE_KEY[:56]
-        
+
         loop = asyncio.get_event_loop()
 
         while True:
             # Wait initial start time + interval (e.g. 1 minute first run)
-            await asyncio.sleep(60) 
-            
+            await asyncio.sleep(60)
+
             try:
                 if not os.path.exists(self.storage_dir):
                     continue
 
-                chunk_ids = [f for f in os.listdir(self.storage_dir) if not f.startswith('.')]
-                
+                chunk_ids = [f for f in os.listdir(
+                    self.storage_dir) if not f.startswith('.')]
+
                 if not chunk_ids:
-                     continue
-                     
+                    continue
+
                 republished_count = 0
-                
+
                 # Scan all chunks
                 for chunk_id in chunk_ids:
                     file_path = os.path.join(self.storage_dir, chunk_id)
-                    
+
                     try:
                         # Synchronous read in thread pool to avoid blocking async loop
                         def _read_candidate():
@@ -277,10 +278,10 @@ class P2PServer:
                                 return None
 
                         content = await loop.run_in_executor(None, _read_candidate)
-                        
+
                         if not content:
                             continue
-                            
+
                         # Quick heuristic check
                         if not (content.strip().startswith('{') and 'chunks' in content):
                             continue
@@ -296,25 +297,26 @@ class P2PServer:
                                     "size": manifest.get('filesize', 0),
                                     "ts": int(time.time())
                                 })
-                                
+
                                 # Publish to DHT
                                 await self.dht.put(DHT_CATALOG_KEY, entry)
                                 republished_count += 1
                         except:
                             pass
-                            
+
                     except Exception:
                         pass
-                    
+
                     # Yield to other tasks
                     await asyncio.sleep(0)
 
                 if republished_count > 0:
-                    logger.info(f"Catalog Mining: Republished {republished_count} manifests found in raw storage.")
-                    
+                    logger.info(
+                        f"Catalog Mining: Republished {republished_count} manifests found in raw storage.")
+
             except Exception as e:
                 logger.error(f"Catalog republish error: {e}")
-            
+
             # Sleep 5 minutes
             await asyncio.sleep(300)
 
@@ -470,7 +472,8 @@ class P2PServer:
             # Even if we don't have the file physically, we might have the index reference.
             # Or if we just deleted it, we definitely want to remove the index reference.
             if self.dht.delete_local(chunk_id):
-                 logger.info(f"DHT: Cleaned up index for deleted chunk {chunk_id}")
+                logger.info(
+                    f"DHT: Cleaned up index for deleted chunk {chunk_id}")
 
             # 3. Check Loop Prevention
             if chunk_id in self.seen_reclaims:

@@ -151,7 +151,7 @@ class DHT:
         self.routing_table = RoutingTable(self.node_id)
         # chunk_id -> provider_url (Indexing)
         self.storage: Dict[str, str] = {}
-        
+
         # Re-enable Disk Persistence but with TTL logic handled in logic
         self.db_path = os.path.join(storage_dir, "dht_index.json")
         self._load_db()
@@ -172,14 +172,15 @@ class DHT:
                     # Skip Catalog items (lists) which have internal logic or long retention
                     if k.startswith("catalog_"):
                         continue
-                        
+
                     # Check Dict format items with timestamp
                     if isinstance(v, dict) and 'ts' in v:
                         if now - v['ts'] > DATA_TTL:
                             expired.append(k)
-                
+
                 if expired:
-                    logger.info(f"DHT Cleanup: Removing {len(expired)} expired entries.")
+                    logger.info(
+                        f"DHT Cleanup: Removing {len(expired)} expired entries.")
                     for k in expired:
                         del self.storage[k]
                     self._save_db()
@@ -196,7 +197,7 @@ class DHT:
                 # MIGRATION & SELF-HEALING
                 # 1. Convert old string values to TTL-aware dicts
                 # 2. Validate local files
-                
+
                 new_storage = {}
                 keys_removed = 0
                 now = time.time()
@@ -210,39 +211,42 @@ class DHT:
                     # Handle Chunk Records
                     # Format migration: String -> Dict
                     if isinstance(val, str):
-                        # It's an old record. 
+                        # It's an old record.
                         # SELF-HEALING CHECK: If it points to me, does it exist?
                         if str(self.port) in val and len(key) == 64:
                             # Direct check
-                            chunk_path = os.path.join(os.path.dirname(self.db_path), key)
+                            chunk_path = os.path.join(
+                                os.path.dirname(self.db_path), key)
                             if not os.path.exists(chunk_path):
                                 keys_removed += 1
                                 continue
-                        
+
                         # Upgrade to new format with 'fresh' timestamp so it survives one cycle
                         new_storage[key] = {'v': val, 'ts': now}
-                    
+
                     elif isinstance(val, dict) and 'v' in val:
                         # Already new format
                         # Check expiry? No, strictly load what we have, let cleanup loop handle it.
-                        
+
                         # Still apply Self-Healing for consistency on restart
                         actual_val = val['v']
                         if str(self.port) in actual_val and len(key) == 64:
-                             chunk_path = os.path.join(os.path.dirname(self.db_path), key)
-                             if not os.path.exists(chunk_path):
-                                 keys_removed += 1
-                                 continue
-                        
+                            chunk_path = os.path.join(
+                                os.path.dirname(self.db_path), key)
+                            if not os.path.exists(chunk_path):
+                                keys_removed += 1
+                                continue
+
                         new_storage[key] = val
                     else:
                         # Unknown garbage
                         keys_removed += 1
 
                 self.storage = new_storage
-                
+
                 if keys_removed > 0:
-                    logger.warning(f"DHT: Pruned {keys_removed} invalid/legacy entries during load.")
+                    logger.warning(
+                        f"DHT: Pruned {keys_removed} invalid/legacy entries during load.")
                     self._save_db()
 
                 logger.info(f"Loaded {len(self.storage)} keys from DB.")
@@ -364,7 +368,7 @@ class DHT:
                     new_id = new_obj.get('id')
                 except:
                     pass
-                
+
                 # 2. Filter out explicit duplicates (same content) or Same-ID (update ts)
                 cleaned_list = []
                 for existing in self.storage[key_hex]:
@@ -377,22 +381,22 @@ class DHT:
                         try:
                             ex_obj = json.loads(existing)
                             if ex_obj.get('id') == new_id:
-                                keep = False # Replace old version with new
+                                keep = False  # Replace old version with new
                         except:
                             pass
-                    
+
                     if keep:
                         cleaned_list.append(existing)
-                
+
                 # 3. Append new value
                 cleaned_list.append(value)
-                
+
                 # 4. Cap size
-                if len(cleaned_list) > 100: # Increased limit
-                    cleaned_list = cleaned_list[-100:] # Keep recent
-                
+                if len(cleaned_list) > 100:  # Increased limit
+                    cleaned_list = cleaned_list[-100:]  # Keep recent
+
                 self.storage[key_hex] = cleaned_list
-                
+
             self._save_db()
             return {"status": "ok"}
 
