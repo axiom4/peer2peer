@@ -801,90 +801,90 @@
       }
 
       // --- Upload Logic ---
-      
+
       // Core upload function (No UI)
       function performUpload(file, targetPath, onProgress) {
         return new Promise((resolve, reject) => {
-           const replicas = document.getElementById("replicasInput").value || 5;
-           const compression = document.getElementById("compressionCheck").checked;
-           
-           const formData = new FormData();
-           formData.append("file", file);
-           formData.append("redundancy", replicas);
-           formData.append("compression", compression);
-           
-           const xhr = new XMLHttpRequest();
-           xhr.open("POST", "/api/upload", true);
-           
-           xhr.upload.onprogress = (event) => {
-             if (event.lengthComputable) {
-               const percent = Math.round((event.loaded / event.total) * 100);
-               // Upload phase is 40% of total process
-               onProgress(Math.round(percent * 0.4), "Uploading...");
-             }
-           };
-           
-           xhr.onload = () => {
-             if (xhr.status === 200) {
-               try {
-                 const result = JSON.parse(xhr.responseText);
-                 if (result.status === "processing" && result.task_id) {
-                    const taskId = result.task_id;
-                    
-                    const pollInterval = setInterval(async () => {
-                      try {
-                        const res = await fetch(`/api/progress/${taskId}`);
-                        const task = await res.json();
-                        
-                        if (task.status === "completed") {
-                           clearInterval(pollInterval);
-                           onProgress(100, "Completed");
-                           
-                           const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
-                           if (match && match[1]) {
-                             // Register in FS
-                             await addFileToFs(match[1], file.name, file.size, targetPath);
-                             resolve(match[1]);
-                           } else {
-                             resolve(true); 
-                           }
-                           
-                        } else if (task.status === "error") {
-                           clearInterval(pollInterval);
-                           reject(new Error(task.message));
-                        } else {
-                           // Processing phase (40-100%)
-                           let p = task.percent;
-                           let visualP = 40 + Math.round(p * 0.6);
-                           onProgress(visualP, task.message);
-                        }
-                      } catch(e) { 
+          const replicas = document.getElementById("replicasInput").value || 5;
+          const compression = document.getElementById("compressionCheck").checked;
+
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("redundancy", replicas);
+          formData.append("compression", compression);
+
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/upload", true);
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const percent = Math.round((event.loaded / event.total) * 100);
+              // Upload phase is 40% of total process
+              onProgress(Math.round(percent * 0.4), "Uploading...");
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              try {
+                const result = JSON.parse(xhr.responseText);
+                if (result.status === "processing" && result.task_id) {
+                  const taskId = result.task_id;
+
+                  const pollInterval = setInterval(async () => {
+                    try {
+                      const res = await fetch(`/api/progress/${taskId}`);
+                      const task = await res.json();
+
+                      if (task.status === "completed") {
                         clearInterval(pollInterval);
-                        reject(e);
+                        onProgress(100, "Completed");
+
+                        const match = task.message.match(/Manifest ID: ([a-f0-9]{64})/i);
+                        if (match && match[1]) {
+                          // Register in FS
+                          await addFileToFs(match[1], file.name, file.size, targetPath);
+                          resolve(match[1]);
+                        } else {
+                          resolve(true);
+                        }
+                      } else if (task.status === "error") {
+                        clearInterval(pollInterval);
+                        reject(new Error(task.message));
+                      } else {
+                        // Processing phase (40-100%)
+                        let p = task.percent;
+                        let visualP = 40 + Math.round(p * 0.6);
+                        onProgress(visualP, task.message);
                       }
-                    }, 500);
-                    
-                 } else {
-                   reject(new Error("Invalid server response"));
-                 }
-               } catch(e) { reject(e); }
-             } else {
-               reject(new Error("Upload failed: " + xhr.status));
-             }
-           };
-           
-           xhr.onerror = () => reject(new Error("Network error"));
-           xhr.send(formData);
+                    } catch (e) {
+                      clearInterval(pollInterval);
+                      reject(e);
+                    }
+                  }, 500);
+                } else {
+                  reject(new Error("Invalid server response"));
+                }
+              } catch (e) {
+                reject(e);
+              }
+            } else {
+              reject(new Error("Upload failed: " + xhr.status));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.send(formData);
         });
       }
 
       function uploadFileDirectly(file, targetPath = null) {
-          const tPath = targetPath || currentFsPath;
-          const statusDiv = document.getElementById("uploadStatus");
-          statusDiv.className = "active";
-          
-          // Reset UI
-          statusDiv.innerHTML = `
+        const tPath = targetPath || currentFsPath;
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.className = "active";
+
+        // Reset UI
+        statusDiv.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <strong class="small text-truncate" style="max-width: 250px;" title="${file.name}">Uploading ${file.name}</strong>
                     <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
@@ -894,38 +894,40 @@
                 </div>
                 <div id="statusText" class="text-muted small text-truncate" style="font-size: 0.8em; max-width: 100%;">Starting...</div>
               `;
-          
-          return performUpload(file, tPath, (percent, msg) => {
-             const pb = document.getElementById("progressBar");
-             const st = document.getElementById("statusText");
-             if(pb) {
-               pb.style.width = percent + "%";
-               pb.innerText = percent + "%";
-               if(percent === 100) pb.classList.add("bg-success");
-             }
-             if(st) st.innerText = msg;
-          }).then(() => {
-             setTimeout(() => statusDiv.classList.remove("active"), 1500);
-          }).catch(e => {
-             statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2 small">${e.message}</div>`;
+
+        return performUpload(file, tPath, (percent, msg) => {
+          const pb = document.getElementById("progressBar");
+          const st = document.getElementById("statusText");
+          if (pb) {
+            pb.style.width = percent + "%";
+            pb.innerText = percent + "%";
+            if (percent === 100) pb.classList.add("bg-success");
+          }
+          if (st) st.innerText = msg;
+        })
+          .then(() => {
+            setTimeout(() => statusDiv.classList.remove("active"), 1500);
+          })
+          .catch((e) => {
+            statusDiv.innerHTML = `<div class="alert alert-danger mb-0 p-2 small">${e.message}</div>`;
           });
       }
 
       // Batch Upload Logic
       async function processBatchQueue(tasks) {
-         if(!tasks || tasks.length === 0) return;
-         
-         const statusDiv = document.getElementById("uploadStatus");
-         statusDiv.className = "active";
-         
-         const totalTasks = tasks.length;
-         let completed = 0;
-         
-         // Calculate total size for weighted progress
-         const totalBytes = tasks.reduce((acc, t) => acc + t.file.size, 0);
-         let processedBytes = 0;
-         
-         statusDiv.innerHTML = `
+        if (!tasks || tasks.length === 0) return;
+
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.className = "active";
+
+        const totalTasks = tasks.length;
+        let completed = 0;
+
+        // Calculate total size for weighted progress
+        const totalBytes = tasks.reduce((acc, t) => acc + t.file.size, 0);
+        let processedBytes = 0;
+
+        statusDiv.innerHTML = `
               <div class="d-flex justify-content-between align-items-center mb-2">
                   <strong class="small">Batch Upload (${totalTasks} files)</strong>
                   <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('uploadStatus').classList.remove('active')"></button>
@@ -935,51 +937,51 @@
               </div>
               <div id="batchStatusText" class="text-muted small text-truncate" style="font-size: 0.8em;">Starting batch...</div>
             `;
-            
-         for(let i=0; i<tasks.length; i++) {
-            const task = tasks[i];
-            const currentFileType = task.file.name;
-            
-            document.getElementById("batchStatusText").innerText = `(${i+1}/${totalTasks}) Uploading ${task.file.name}...`;
-            
-            try {
-               await performUpload(task.file, task.targetPath, (percent, msg) => {
-                  // Calculate overall progress
-                  // Current file contribution
-                  const currentFileDone = (percent / 100) * task.file.size;
-                  const totalDone = processedBytes + currentFileDone;
-                  const totalPercent = Math.round((totalDone / totalBytes) * 100);
-                  
-                  const pb = document.getElementById("batchProgressBar");
-                  if(pb) {
-                    pb.style.width = totalPercent + "%";
-                    pb.innerText = totalPercent + "%"; 
-                  }
-               });
-               processedBytes += task.file.size;
-               completed++;
-            } catch(e) {
-               console.error(`Failed to upload ${task.file.name}: ${e}`);
-               // Treat as processed (skip)
-               processedBytes += task.file.size; 
-            }
-         }
-         
-         // Finalize
-         const pb = document.getElementById("batchProgressBar");
-         if(pb) {
-             pb.style.width = "100%";
-             pb.innerText = "Done";
-             pb.classList.remove("progress-bar-animated");
-             pb.classList.add("bg-success");
-         }
-         document.getElementById("batchStatusText").innerText = `Batch completed. ${completed}/${totalTasks} uploaded.`;
-         
-         setTimeout(() => statusDiv.classList.remove("active"), 2000);
-         
-         // Refresh UI
-         loadFilesystem(currentFsPath);
-         refreshActiveTreeNode();
+
+        for (let i = 0; i < tasks.length; i++) {
+          const task = tasks[i];
+          const currentFileType = task.file.name;
+
+          document.getElementById("batchStatusText").innerText = `(${i + 1}/${totalTasks}) Uploading ${task.file.name}...`;
+
+          try {
+            await performUpload(task.file, task.targetPath, (percent, msg) => {
+              // Calculate overall progress
+              // Current file contribution
+              const currentFileDone = (percent / 100) * task.file.size;
+              const totalDone = processedBytes + currentFileDone;
+              const totalPercent = Math.round((totalDone / totalBytes) * 100);
+
+              const pb = document.getElementById("batchProgressBar");
+              if (pb) {
+                pb.style.width = totalPercent + "%";
+                pb.innerText = totalPercent + "%";
+              }
+            });
+            processedBytes += task.file.size;
+            completed++;
+          } catch (e) {
+            console.error(`Failed to upload ${task.file.name}: ${e}`);
+            // Treat as processed (skip)
+            processedBytes += task.file.size;
+          }
+        }
+
+        // Finalize
+        const pb = document.getElementById("batchProgressBar");
+        if (pb) {
+          pb.style.width = "100%";
+          pb.innerText = "Done";
+          pb.classList.remove("progress-bar-animated");
+          pb.classList.add("bg-success");
+        }
+        document.getElementById("batchStatusText").innerText = `Batch completed. ${completed}/${totalTasks} uploaded.`;
+
+        setTimeout(() => statusDiv.classList.remove("active"), 2000);
+
+        // Refresh UI
+        loadFilesystem(currentFsPath);
+        refreshActiveTreeNode();
       }
 
       // --- Helper Functions ---
@@ -1038,7 +1040,7 @@
             entries.push(entry);
           }
         }
-        
+
         if (entries.length === 0) return;
 
         if (!confirm(`Upload ${entries.length} items (and subfolders) to current folder?`)) return;
@@ -1047,34 +1049,34 @@
 
         // Recursive collector
         async function collect(item) {
-           if (item.isFile) {
-              return new Promise((resolve) => {
-                 item.file(f => {
-                    const relativeFolder = item.fullPath.substring(0, item.fullPath.lastIndexOf("/"));
-                    const targetDir = (currentFsPath === "/" ? "" : currentFsPath) + relativeFolder;
-                    ensureDirectory(targetDir).then(() => {
-                        batchTasks.push({ file: f, targetPath: targetDir });
-                        resolve();
-                    });
-                 });
+          if (item.isFile) {
+            return new Promise((resolve) => {
+              item.file((f) => {
+                const relativeFolder = item.fullPath.substring(0, item.fullPath.lastIndexOf("/"));
+                const targetDir = (currentFsPath === "/" ? "" : currentFsPath) + relativeFolder;
+                ensureDirectory(targetDir).then(() => {
+                  batchTasks.push({ file: f, targetPath: targetDir });
+                  resolve();
+                });
               });
-           } else if (item.isDirectory) {
-              const dirPath = (currentFsPath === "/" ? "" : currentFsPath) + item.fullPath;
-              await ensureDirectory(dirPath);
-              const dirReader = item.createReader();
-              const entries = await getAllEntries(dirReader);
-              for(const entry of entries) {
-                 await collect(entry);
-              }
-           }
+            });
+          } else if (item.isDirectory) {
+            const dirPath = (currentFsPath === "/" ? "" : currentFsPath) + item.fullPath;
+            await ensureDirectory(dirPath);
+            const dirReader = item.createReader();
+            const entries = await getAllEntries(dirReader);
+            for (const entry of entries) {
+              await collect(entry);
+            }
+          }
         }
-        
+
         for (const entry of entries) {
-           await collect(entry);
+          await collect(entry);
         }
-        
-        if(batchTasks.length > 0) {
-            processBatchQueue(batchTasks);
+
+        if (batchTasks.length > 0) {
+          processBatchQueue(batchTasks);
         }
       }
     </script>
