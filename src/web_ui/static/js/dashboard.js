@@ -63,18 +63,76 @@ function streamDownload(manifestName) {
 async function deleteManifest(name) {
   if (!confirm(`Are you sure you want to delete ${name} and all its chunks from the network? This cannot be undone.`)) return;
 
+  const statusDiv = document.getElementById("uploadStatus");
+  statusDiv.classList.add("active");
+  statusDiv.innerHTML = `
+        <div class="progress mb-2" style="height: 25px;">
+            <div id="deleteBar" class="progress-bar progress-bar-striped progress-bar-animated bg-danger" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+        <div id="deleteStatusText" class="text-muted small">Starting deletion...</div>
+    `;
+
   try {
     const res = await fetch(`/api/manifests/${name}`, { method: "DELETE" });
     const result = await res.json();
 
-    if (res.ok) {
-      loadManifests(); // Refresh list
-      loadCatalog(); // Refresh public catalog as well
+    if (result.status === "processing" && result.task_id) {
+      const taskId = result.task_id;
+      const progressBar = document.getElementById("deleteBar");
+      const statusText = document.getElementById("deleteStatusText");
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/progress/${taskId}`);
+          const task = await r.json();
+
+          if (task.status === "completed") {
+            clearInterval(pollInterval);
+            if (progressBar) {
+              progressBar.style.width = "100%";
+              progressBar.innerText = "Done";
+              progressBar.classList.remove("progress-bar-animated");
+              progressBar.classList.add("bg-success");
+              progressBar.classList.remove("bg-danger");
+            }
+            if (statusText) statusText.innerText = task.message;
+
+            // Refresh
+            loadManifests();
+            loadCatalog();
+
+            setTimeout(() => {
+              statusDiv.classList.remove("active");
+              statusDiv.innerHTML = "";
+            }, 3000);
+          } else if (task.status === "error") {
+            clearInterval(pollInterval);
+            statusDiv.innerHTML = `<div class="alert alert-danger">${task.message}</div>`;
+          } else {
+            if (progressBar) {
+              progressBar.style.width = task.percent + "%";
+              progressBar.innerText = task.percent + "%";
+            }
+            if (statusText) statusText.innerText = task.message;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 800);
+    } else if (res.ok) {
+      // Fallback for legacy sync response
+      loadManifests();
+      loadCatalog();
+      statusDiv.innerHTML = `<div class="alert alert-success">Deleted successfully</div>`;
+      setTimeout(() => {
+        statusDiv.classList.remove("active");
+        statusDiv.innerHTML = "";
+      }, 2000);
     } else {
-      alert("Error: " + (result.error || result.message));
+      statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.error || result.message}</div>`;
     }
   } catch (e) {
-    alert("Network error deleting manifest");
+    statusDiv.innerHTML = `<div class="alert alert-danger">Network error deleting manifest</div>`;
   }
 }
 

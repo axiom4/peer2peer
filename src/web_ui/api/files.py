@@ -148,94 +148,127 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
 
 async def delete_manifest(request):
     name = request.match_info['name']
-    is_id = len(name) == 64 and all(
-        c in '0123456789abcdefABCDEF' for c in name)
+    task_id = str(uuid.uuid4())
+    TASKS[task_id] = {
+        "status": "processing",
+        "message": "Initiating network scan for deletion...",
+        "percent": 0
+    }
 
-    found_peers = await scan_network(timeout=3.0)
-    visited = set(found_peers)
-    queue = list(found_peers)
+    asyncio.create_task(_process_deletion_task(task_id, name))
 
-    if queue:
-        async with aiohttp.ClientSession() as session:
-            crawl_tasks = []
-            for p in queue:
-                crawl_tasks.append(session.get(f"{p}/peers", timeout=1.0))
-            try:
-                responses = await asyncio.gather(*crawl_tasks, return_exceptions=True)
-                for res in responses:
-                    if not isinstance(res, Exception) and res.status == 200:
-                        try:
-                            p_data = await res.json()
-                            for extended_peer in p_data.get('peers', []):
-                                visited.add(extended_peer.rstrip('/'))
-                        except:
-                            pass
-            except:
-                pass
+    return web.json_response({
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Deletion started in background"
+    })
 
-    final_peers = list(visited)
-    manifest_id_to_delete = None
-    chunks_to_delete = []
 
-    if is_id:
-        manifest_id_to_delete = name
-        manifest_data = None
-        if final_peers:
-            async with aiohttp.ClientSession() as session:
-                for peer in final_peers:
-                    try:
-                        async with session.get(f"{peer}/chunk/{name}", timeout=2.0) as resp:
-                            if resp.status == 200:
-                                manifest_data = await resp.read()
-                                break
-                    except:
-                        continue
-        if manifest_data:
-            try:
-                data = json.loads(manifest_data)
-                chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-            except Exception as e:
-                print(f"Delete: Failed to parse manifest JSON: {e}")
-    else:
-        if not name.endswith('.manifest'):
-            name += '.manifest'
-        manifest_path = os.path.join('manifests', name)
-        if not os.path.exists(manifest_path):
-            return web.json_response({"error": "Manifest not found"}, status=404)
-
-        try:
-            cat_nodes = [RemoteHttpNode(u) for u in final_peers] if final_peers else [
-                RemoteHttpNode(f"http://127.0.0.1:{p}") for p in range(8000, 8005)]
-            cat_client = CatalogClient()
-            items = await cat_client.fetch(cat_nodes)
-            found_ids = [item['id'] for item in items if item.get(
-                'name') == name.replace('.manifest', '') or item.get('name') == name]
-
-            if found_ids:
-                manifest_id_to_delete = found_ids[0]
-
-            with open(manifest_path, 'r') as f:
-                content_str = f.read()
-                data = json.loads(content_str)
-                chunks_to_delete = [c['id'] for c in data.get('chunks', [])]
-                if not manifest_id_to_delete:
-                    # Calculate ID from local file if catalog search failed
-                    norm_bytes = json.dumps(data).encode('utf-8')
-                    manifest_id_to_delete = hashlib.sha256(
-                        norm_bytes).hexdigest()
-        except Exception as e:
-            return web.json_response({"error": f"Invalid manifest: {e}"}, status=500)
-
-    force_delete = request.query.get('force', '').lower() == 'true'
-
+async def _process_deletion_task(task_id, name):
     try:
-        await _delete_file_from_network(manifest_id_to_delete, known_chunks=chunks_to_delete, force=force_delete)
-        if not is_id and 'manifest_path' in locals() and os.path.exists(manifest_path):
-            os.remove(manifest_path)
-    except Exception as e:
-        return web.json_response({"error": f"Safe Delete Aborted: {str(e)}"}, status=500)
+        is_id = len(name) == 64 and all(
+            c in '0123456789abcdefABCDEF' for c in name)
 
-    return web.json_response({"status": "ok", "message": f"Deleted manifest {name}"})
+        # 1. Scan Network
+        TASKS[task_id].update(
+            {"message": "Scanning network for peers...", "percent": 10})
+        found_peers = await scan_network(timeout=3.0)
+
+        visited = set(found_peers)
+        queue = list(found_peers)
+
+        if queue:
+            TASKS[task_id].update(
+                {"message": "Crawling peer network...", "percent": 20})
+            async with aiohttp.ClientSession() as session:
+                crawl_tasks = []
+                for p in queue:
+                    crawl_tasks.append(session.get(f"{p}/peers", timeout=1.0))
+                try:
+                    responses = await asyncio.gather(*crawl_tasks, return_exceptions=True)
+                    for res in responses:
+                        if not isinstance(res, Exception) and res.status == 200:
+                            try:
+                                p_data = await res.json()
+                                for extended_peer in p_data.get('peers', []):
+                                    visited.add(extended_peer.rstrip('/'))
+                            except:
+                                pass
+                except:
+                    pass
+
+        final_peers = list(visited)
+        TASKS[task_id].update(
+            {"message": f"Found {len(final_peers)} active peers. Resolving target...", "percent": 30})
+
+        manifest_id_to_delete = None
+        chunks_to_delete = []
+
+        if is_id:
+            manifest_id_to_delete = name
+            TASKS[task_id].update(
+                {"message": "Resolving chunks for ID...", "percent": 40})
+            # Try to fetch manifest to get chunk list
+            if final_peers:
+                async with aiohttp.ClientSession() as session:
+                    for peer in final_peers:
+                        try:
+                            async with session.get(f"{peer}/chunk/{name}", timeout=2) as r:
+                                if r.status == 200:
+                                    data = await r.json()
+                                    chunks_to_delete = [c['id']
+                                                        for c in data.get('chunks', [])]
+                                    break
+                        except:
+                            continue
+        else:
+            # Name-based lookup
+            TASKS[task_id].update(
+                {"message": "Resolving filename to ID...", "percent": 40})
+            manifest_path = os.path.join('manifests', f"{name}.manifest")
+            if os.path.exists(manifest_path):
+                try:
+                    with open(manifest_path, 'r') as f:
+                        data = json.load(f)
+                        manifest_id_to_delete = data.get('id')
+                        chunks_to_delete = [c['id']
+                                            for c in data.get('chunks', [])]
+                    # Also delete local manifest file
+                    os.remove(manifest_path)
+                except Exception as e:
+                    print(f"Delete error local: {e}")
+            else:
+                # Try to resolve via DHT/Peers if local file missing?
+                # For now assume if not found locally, we treat 'name' as ID if it looked like one,
+                # but here it's definitely a name.
+                TASKS[task_id].update(
+                    {"message": "Local manifest not found, attempting network cleanup by name...", "percent": 45})
+
+        TASKS[task_id].update(
+            {"message": "Broadcasting delete commands...", "percent": 60})
+
+        # Execute Deletion
+        # We pass peers to avoid re-scanning
+        await _delete_file_from_network(
+            manifest_id=manifest_id_to_delete if manifest_id_to_delete else "unknown",
+            name_hint=name if not is_id else None,
+            peers=final_peers,
+            known_chunks=chunks_to_delete
+        )
+
+        TASKS[task_id].update({
+            "status": "completed",
+            "message": f"Successfully deleted {name}",
+            "percent": 100
+        })
+
+    except Exception as e:
+        print(f"Async Delete Error: {e}")
+        TASKS[task_id].update({
+            "status": "error",
+            "message": str(e),
+            "percent": 0
+        })
 
 
 async def get_manifest_detail(request):
