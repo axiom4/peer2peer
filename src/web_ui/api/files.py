@@ -21,7 +21,7 @@ from ..deps import (
     DistributionStrategy
 )
 from ..state import TASKS
-from ..services import get_active_peers, check_chunk_task, get_dht_nodes
+from ..services import get_active_peers, check_chunk_task, get_dht_nodes, fs_fetch_node_fn
 
 
 async def get_progress(request):
@@ -89,6 +89,11 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
                 for t in tasks:
                     if not t.done():
                         t.cancel()
+
+        # Fallback: Try DHT if peers didn't yield manifest
+        if not manifest_data:
+            print(f"Delete: Manifest {manifest_id[:8]} not found on peers, trying DHT...")
+            manifest_data = await fs_fetch_node_fn(manifest_id)
 
         if manifest_data:
             try:

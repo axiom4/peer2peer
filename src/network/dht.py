@@ -353,6 +353,8 @@ class DHT:
                 obj = json.loads(value)
                 if isinstance(obj, dict) and 'id' in obj:
                     target_id = obj['id']
+                else:
+                    target_id = value
             except:
                 target_id = value
 

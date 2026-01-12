@@ -451,3 +451,19 @@ flowchart TD
 
     Replicate --> Restore["✅ Redundancy Restored (N=5)"]
 ```
+
+## 5. Node Lifecycle Management
+
+### Graceful Unjoin Protocol
+
+Nodes can leave the network without causing data loss through the "Unjoin" process:
+
+1. **Trigger**: POST request to `/unjoin`.
+2. **Inventory Analysis**: The node scans its local storage for all hosted chunks.
+3. **Cluster Replica Discovery**: The node scans for available peers in the cluster.
+4. **Data Offloading**:
+   - The node actively pushes (PUT) each chunk to a random active peer.
+   - This ensures the replication factor is maintained.
+5. **Self-Destruct**:
+   - Once all data is transferred, the node recursively deletes its local storage directory.
+   - The process terminates gracefully, notifying the cluster via stopped Beacon.
