@@ -92,7 +92,8 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
 
         # Fallback: Try DHT if peers didn't yield manifest
         if not manifest_data:
-            print(f"Delete: Manifest {manifest_id[:8]} not found on peers, trying DHT...")
+            print(
+                f"Delete: Manifest {manifest_id[:8]} not found on peers, trying DHT...")
             manifest_data = await fs_fetch_node_fn(manifest_id)
 
         if manifest_data:
