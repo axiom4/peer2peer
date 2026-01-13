@@ -13,10 +13,10 @@ async def fetch_catalog(request):
     try:
         # Use active peers from service (handles caching and filtering self)
         peers = await get_active_peers()
-        
+
         nodes = []
         server = state.GLOBAL_P2P_SERVER
-        
+
         if server and peers:
             loop = asyncio.get_running_loop()
             for p in peers:
@@ -39,24 +39,25 @@ async def get_network_graph(request):
     try:
         # Use get_active_peers which handles filtering and caching
         peers = await get_active_peers()
-        
+
         nodes = []
         edges = []
-        
+
         # Self node
         local_id = "WebUI"
         server = state.GLOBAL_P2P_SERVER
         if server:
             local_id = server.host.get_id().to_string()
-            
-        nodes.append({"id": local_id, "label": "This Node (WebUI)", "group": "local"})
-        
+
+        nodes.append(
+            {"id": local_id, "label": "This Node (WebUI)", "group": "local"})
+
         for p in peers:
             # p is a multiaddr like /ip4/.../p2p/QmID
             parts = p.split('/')
             peer_id = parts[-1] if 'p2p' in parts else p
             short_label = peer_id[:8] + "..."
-            
+
             nodes.append({"id": peer_id, "label": short_label})
             # We are connected to them
             edges.append({"from": local_id, "to": peer_id})

@@ -16,6 +16,7 @@ from libp2p.abc import IHost
 
 logger = logging.getLogger(__name__)
 
+
 def setup_local_network(base_dir="network_data") -> List[StorageNode]:
     """Initializes a simulated network of local nodes (Fallback)."""
     nodes = []
@@ -23,6 +24,7 @@ def setup_local_network(base_dir="network_data") -> List[StorageNode]:
         node = LocalDirNode(f"node_{i}", base_path=base_dir)
         nodes.append(node)
     return nodes
+
 
 async def setup_remote_network(entry_node: str, bridge: Any) -> List[StorageNode]:
     """
@@ -33,10 +35,10 @@ async def setup_remote_network(entry_node: str, bridge: Any) -> List[StorageNode
         raise ValueError("Entry node MultiAddr is required")
 
     print(f"Connecting to entry node: {entry_node}...")
-    
+
     loop = asyncio.get_running_loop()
     node = RemoteLibP2PNode(entry_node, bridge, loop)
-    
+
     # Try to connect
     if await node._ensure_connection():
         print("Connected to entry node.")
@@ -45,25 +47,26 @@ async def setup_remote_network(entry_node: str, bridge: Any) -> List[StorageNode
         print("Failed to connect to entry node.")
         return []
 
+
 async def distribute_wrapper(args, progress_callback=None):
     """Async wrapper for distribution logic."""
-    
+
     # Check if a server instance is already provided in args
     server = getattr(args, 'server', None)
-    
+
     if server:
         pass
     else:
         # Initialize a local P2P Node (Host) to act as client
         # Use ephemeral port or explicit
-        port = getattr(args, 'port', 0) 
+        port = getattr(args, 'port', 0)
         storage_dir = "uploads_temp"
-        
+
         server = P2PServer("127.0.0.1", port, storage_dir)
         await server.initialize()
         # await server.start() # Starts background tasks - don't start loop if possible
         # Just initialize host so we can use it
-    
+
     await _distribute_logic(args, server, progress_callback)
 
 
@@ -75,12 +78,12 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
 
     redundancy = getattr(args, 'redundancy', 5)
     nodes = []
-    
+
     # Collect potential peer addresses
     peer_addrs = set()
     if getattr(args, 'entry_node', None):
         peer_addrs.add(args.entry_node)
-    
+
     known_peers = getattr(args, 'known_peers', [])
     if known_peers:
         peer_addrs.update(known_peers)
@@ -100,12 +103,13 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
                     print(f"Could not connect to {addr}")
             except Exception as e:
                 print(f"Error connecting to {addr}: {e}")
-        
+
         # Cap redundancy
         if len(nodes) < redundancy:
-            print(f"Warning: Only {len(nodes)} nodes available. Redundancy reduced.")
+            print(
+                f"Warning: Only {len(nodes)} nodes available. Redundancy reduced.")
             redundancy = len(nodes)
-            
+
     elif getattr(args, 'local', False):
         nodes = setup_local_network()
     else:
@@ -113,33 +117,33 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
         print("Using local simulation.")
         nodes = setup_local_network()
 
-
     if not nodes:
         print("No nodes available.")
         return
 
     distributor = DistributionStrategy(nodes, redundancy_factor=redundancy)
-    
+
     print(f"Active nodes: {len(nodes)}")
-    
+
     key = CryptoManager.generate_key()
     shard_mgr = ShardManager(key)
-    
+
     print("Processing file and streaming uploads...")
     if progress_callback:
         progress_callback(0, "Sharding and encrypting...")
-    
+
     async def process_and_upload_async():
         chunks_info = []
         chunk_generator = shard_mgr.process_file(file_path, compression=True)
-        
+
         # To avoid loading the whole file in RAM, we should ideally use a queue,
-        # but for compatibility with previous logic (which queued all futures), 
-        # we'll collect tasks. 
+        # but for compatibility with previous logic (which queued all futures),
+        # we'll collect tasks.
         # IMPROVEMENT: Use a bounded semaphore to limit active tasks.
-        
+
         tasks = []
-        semaphore = asyncio.Semaphore(5) # Limit to 5 concurrent chunk distributions
+        # Limit to 5 concurrent chunk distributions
+        semaphore = asyncio.Semaphore(5)
 
         async def upload_bound(chunk):
             async with semaphore:
@@ -154,31 +158,32 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
 
         # Convert generator to list of tasks, but we need to know total for progress
         # If we iterate, we consume.
-        
+
         # Let's just consume and launch tasks.
         all_chunks = list(chunk_generator)
         total_chunks = len(all_chunks)
-        
+
         for chunk in all_chunks:
             task = asyncio.create_task(upload_bound(chunk))
             tasks.append(task)
-            
+
         completed = 0
         for f in asyncio.as_completed(tasks):
             res = await f
             if res:
                 chunks_info.append(res)
-            
+
             completed += 1
             if progress_callback:
                 percent = int((completed / total_chunks) * 100)
-                progress_callback(percent, f"Uploaded {completed}/{total_chunks} chunks")
-                    
+                progress_callback(
+                    percent, f"Uploaded {completed}/{total_chunks} chunks")
+
         return chunks_info
 
     # Run async logic directly
     chunks_info = await process_and_upload_async()
-    
+
     # Verify completeness
     if len(chunks_info) == 0:
         print("Error: No chunks uploaded.")
@@ -189,13 +194,13 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
     chunks_info.sort(key=lambda x: x['index'])
     expected_indices = set(range(len(chunks_info)))
     actual_indices = set(c['index'] for c in chunks_info)
-    
+
     # Note: If a middle chunk failed, len(chunks_info) will be less than total emitted.
     # But since we don't know total emitted from generator easily without consuming...
-    # Better to check if any task returned None. 
+    # Better to check if any task returned None.
     # But process_and_upload_async filters None.
     # Improvement: process_and_upload_async should throw or return status.
-    
+
     # Let's rely on continuity of indices assuming 0-based
     if chunks_info[-1]['index'] != len(chunks_info) - 1:
         error_msg = f"Upload incomplete. Missing chunks. Got {len(chunks_info)} chunks, last index {chunks_info[-1]['index']}"
@@ -208,9 +213,9 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
     meta_mgr = MetadataManager(manifest_dir=None)
     manifest_dict = meta_mgr.create_manifest(
         os.path.basename(file_path), key, chunks_info, compression=True)
-        
+
     print("Distribution complete.")
-    
+
     # -------------------------------------------------------------
     # DECENTRALIZED MANIFEST STORAGE
     # -------------------------------------------------------------
@@ -219,20 +224,21 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
     # Generate ID for the manifest (Content Hash)
     import hashlib
     manifest_id = hashlib.sha256(manifest_json).hexdigest()
-    
+
     # Inject the ID into the manifest dictionary itself (useful for local reference)
     manifest_dict['id'] = manifest_id
-    
+
     print(f"Uploading manifest (ID: {manifest_id}) to network...")
     try:
         if progress_callback:
             progress_callback(95, "Uploading manifest to network...")
-            
+
         # Distribute the manifest as a chunk
         # Note: distribute_chunk_async returns list of nodes that stored it
         stored_nodes = await distributor.distribute_chunk_async(manifest_id, manifest_json)
-        print(f"Manifest uploaded successfully (decentralized on {len(stored_nodes)} nodes).")
-        
+        print(
+            f"Manifest uploaded successfully (decentralized on {len(stored_nodes)} nodes).")
+
         # 3. Announce to Catalog
         # We broadcast the catalog update to the SAME nodes we stored the manifest on,
         # OR all available nodes. Let's do all available for maximum visibility.
@@ -243,7 +249,7 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
             "chunks": len(manifest_dict.get('chunks', [])),
             "timestamp": manifest_dict.get('timestamp', 0)
         }
-        
+
         print("Announcing to network catalog...")
         announce_count = 0
         for node in distributor.nodes:
@@ -252,21 +258,23 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
                 try:
                     await node.update_catalog_async(catalog_entry)
                     announce_count += 1
-                except: pass
+                except:
+                    pass
         print(f"Announced to {announce_count} nodes.")
 
     except Exception as e:
         print(f"Failed to upload manifest to network: {e}")
         # Proceed to save locally anyway so user doesn't lose data
-    
+
     # -------------------------------------------------------------
-    
+
     # Ensure manifests directory exists
     manifest_dir = "manifests"
     if not os.path.exists(manifest_dir):
         os.makedirs(manifest_dir)
-        
-    manifest_path = os.path.join(manifest_dir, f"{os.path.basename(file_path)}.manifest")
+
+    manifest_path = os.path.join(
+        manifest_dir, f"{os.path.basename(file_path)}.manifest")
     with open(manifest_path, "w") as f:
         json.dump(manifest_dict, f, indent=2)
     print(f"Manifest saved to {manifest_path}")
@@ -276,27 +284,28 @@ async def reconstruct_wrapper(args):
     port = getattr(args, 'port', 0)
     server = P2PServer("127.0.0.1", port, "downloads_temp")
     await server.initialize()
-    
+
     await _reconstruct_logic(args, server)
+
 
 async def _reconstruct_logic(args, server):
     manifest_source = args.manifest
     output_path = args.output
-    
+
     nodes = []
     if args.entry_node:
         nodes = await setup_remote_network(args.entry_node, server.host)
     else:
         nodes = setup_local_network()
-        
+
     if not nodes:
         print("No nodes available.")
         return
-        
+
     distributor = DistributionStrategy(nodes)
-    
+
     manifest = None
-    
+
     if os.path.exists(manifest_source):
         with open(manifest_source, 'r') as f:
             manifest = json.load(f)
@@ -313,12 +322,12 @@ async def _reconstruct_logic(args, server):
     else:
         print(f"Manifest not found: {manifest_source}")
         return
-        
+
     key = manifest['key'].encode('utf-8')
     shard_mgr = ShardManager(key)
-    
+
     print("Collecting chunks...")
-    
+
     async def download_all_async():
         chunks_data = []
         semaphore = asyncio.Semaphore(5)
@@ -332,9 +341,10 @@ async def _reconstruct_logic(args, server):
                 except Exception as e:
                     print(f"Failed to retrieve {chunk_id}: {e}")
                     return None
-        
-        tasks = [asyncio.create_task(download_task(c)) for c in manifest['chunks']]
-        
+
+        tasks = [asyncio.create_task(download_task(c))
+                 for c in manifest['chunks']]
+
         for f in asyncio.as_completed(tasks):
             res = await f
             if res:
@@ -343,13 +353,14 @@ async def _reconstruct_logic(args, server):
 
     chunks_data = await download_all_async()
     chunks_data.sort(key=lambda x: x['index'])
-    
+
     print("Reconstructing file...")
     # Reconstruction is CPU bound (decryption/decompression), run in executor if needed
     # But for now, direct call is fine unless files are huge
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, lambda: shard_mgr.reconstruct_file(chunks_data, output_path))
     print(f"File saved to {output_path}")
+
 
 async def prune_orphans(args):
     """
@@ -359,28 +370,31 @@ async def prune_orphans(args):
     print("Pruning orphans (Not Implemented in LibP2P version yet)...")
     return {"status": "skipped", "details": "Not implemented"}
 
+
 class CatalogClient:
     """
     Client for fetching network catalog.
     """
+
     def __init__(self, entry_node=None):
         self.entry_node = entry_node
-        
+
     async def fetch(self, nodes=None) -> List[Dict[str, Any]]:
         if not nodes:
             # Setup local network for discovery if no nodes provided
             nodes = setup_local_network()
-            
+
         all_items = []
         # Parallel fetch from all nodes
         import asyncio
-        tasks = [n.fetch_catalog_async() for n in nodes if hasattr(n, 'fetch_catalog_async')]
-        
+        tasks = [n.fetch_catalog_async()
+                 for n in nodes if hasattr(n, 'fetch_catalog_async')]
+
         if not tasks:
             return []
-            
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         seen_ids = set()
         for res in results:
             if isinstance(res, list):
@@ -388,22 +402,23 @@ class CatalogClient:
                     if item.get('id') not in seen_ids:
                         all_items.append(item)
                         seen_ids.add(item.get('id'))
-        
+
         return all_items
 
     async def delete(self, manifest_id, nodes=None):
         if not nodes:
             nodes = setup_local_network()
-            
+
         import asyncio
         tasks = []
         for n in nodes:
             if hasattr(n, 'remove_catalog_async'):
                 tasks.append(n.remove_catalog_async(manifest_id))
-        
+
         if tasks:
-             await asyncio.gather(*tasks, return_exceptions=True)
-             print(f"Broadcasted delete for {manifest_id} to {len(tasks)} nodes.")
+            await asyncio.gather(*tasks, return_exceptions=True)
+            print(
+                f"Broadcasted delete for {manifest_id} to {len(tasks)} nodes.")
 
 
 def start_server_cmd(args):

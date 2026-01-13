@@ -21,6 +21,7 @@ except ImportError:
     from src.network.p2p_server import P2PServer
 import asyncio
 
+
 async def on_startup(app):
     # Initialize Global P2P Server for the Web UI Node
     # Find a free random port to ensure valid advertising (port 0 is invalid for connect)
@@ -29,18 +30,21 @@ async def on_startup(app):
     sock.bind(('127.0.0.1', 0))
     free_port = sock.getsockname()[1]
     sock.close()
-    
+
     server = P2PServer("127.0.0.1", free_port, "uploads_temp")
     await server.initialize()
     # Start server logic (discovery etc) in background
     asyncio.create_task(server.start())
     state.GLOBAL_P2P_SERVER = server
-    print(f"Global P2P Server initialized for Web UI: {server.host.get_id().to_string()} on port {free_port}")
+    print(
+        f"Global P2P Server initialized for Web UI: {server.host.get_id().to_string()} on port {free_port}")
+
 
 async def on_cleanup(app):
     # Retrieve server from state if needed, but trio loop handling is complex.
     # For now, let it die with the process.
     pass
+
 
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving

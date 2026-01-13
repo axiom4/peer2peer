@@ -70,7 +70,7 @@ class DiscoveryService:
                 }
                 if self.peer_id:
                     msg_dict["peer_id"] = self.peer_id
-                    
+
                 message = json.dumps(msg_dict).encode('utf-8')
 
                 self.broadcast_sock.sendto(
@@ -98,7 +98,7 @@ class DiscoveryService:
                         else:
                             # Fallback (might fail later but better than nothing)
                             peer_url = f"/ip4/{peer_host}/tcp/{peer_port}"
-                            
+
                         if peer_url not in self.peers:
                             logger.info(f"Discovered peer via UDP: {peer_url}")
                             self.peers.add(peer_url)
@@ -116,11 +116,11 @@ class DiscoveryService:
 
                         # Reply with Multiaddr
                         my_ip = socket.gethostbyname(socket.gethostname())
-                        
+
                         my_url = f"/ip4/{my_ip}/tcp/{self.http_port}"
                         if self.peer_id:
                             my_url += f"/p2p/{self.peer_id}"
-                            
+
                         reply = json.dumps({
                             "type": "I_HAVE",
                             "chunk_id": chunk_id,
@@ -176,12 +176,12 @@ def _scan_network_sync(timeout=3):
                 remote_port = int(message.get('port', 0))
                 if remote_port <= 0:
                     continue
-                
+
                 remote_peer_id = message.get("peer_id")
                 if remote_peer_id:
-                     peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}/p2p/{remote_peer_id}"
+                    peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}/p2p/{remote_peer_id}"
                 else:
-                     peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}"
+                    peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}"
                 found_peers.add(peer_url)
         except socket.timeout:
             break

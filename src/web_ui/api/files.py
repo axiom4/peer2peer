@@ -149,11 +149,12 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
     if manifest_id:
         try:
             # dht_nodes = [RemoteLibP2PNode(url, None, None) for url in broadcast_targets]
-            dht_nodes = [] 
+            dht_nodes = []
             if state.GLOBAL_P2P_SERVER:
                 loop = asyncio.get_running_loop()
-                dht_nodes = [RemoteLibP2PNode(url, state.GLOBAL_P2P_SERVER.bridge, loop) for url in broadcast_targets]
-            
+                dht_nodes = [RemoteLibP2PNode(
+                    url, state.GLOBAL_P2P_SERVER.bridge, loop) for url in broadcast_targets]
+
             cat = CatalogClient()
             await cat.delete(manifest_id, dht_nodes)
             if name_hint:
@@ -318,7 +319,7 @@ async def get_manifest_detail(request):
 async def get_manifest_by_id(request):
     manifest_id = request.match_info['id']
     data = None
-    
+
     # 1. Try Local Lookup in manifests directory
     # We scan all manifests because filename != id usually
     manifest_dir = 'manifests'
@@ -340,8 +341,10 @@ async def get_manifest_by_id(request):
                                 if tdata.get('id') == manifest_id:
                                     data = tdata
                                     break
-                        except: pass
-        except: pass
+                        except:
+                            pass
+        except:
+            pass
 
     active_peers = await get_active_peers()
 
@@ -349,9 +352,10 @@ async def get_manifest_by_id(request):
     if not data and active_peers and state.GLOBAL_P2P_SERVER:
         try:
             loop = asyncio.get_running_loop()
-            nodes = [RemoteLibP2PNode(p, state.GLOBAL_P2P_SERVER.bridge, loop) for p in active_peers]
+            nodes = [RemoteLibP2PNode(
+                p, state.GLOBAL_P2P_SERVER.bridge, loop) for p in active_peers]
             distributor = DistributionStrategy(nodes)
-            
+
             # Use async retrieve
             manifest_bytes = await distributor.retrieve_chunk_async(manifest_id)
             if manifest_bytes:
@@ -366,11 +370,13 @@ async def get_manifest_by_id(request):
     # 3. Enrich with Chunk Locations
     if active_peers:
         sem = asyncio.Semaphore(10)
+
         async def bounded_check(chunk):
             async with sem:
                 return await check_chunk_task(chunk['id'], active_peers)
 
-        chunk_tasks = [bounded_check(chunk) for chunk in data.get('chunks', [])]
+        chunk_tasks = [bounded_check(chunk)
+                       for chunk in data.get('chunks', [])]
         if chunk_tasks:
             results = await asyncio.gather(*chunk_tasks)
             lookup = {cid: locs for cid, locs in results}
@@ -421,15 +427,15 @@ async def upload_file(request):
     cached_peers = await get_active_peers()
     entry_node = random.choice(cached_peers) if cached_peers else None
     use_scan = (entry_node is None)
-    
-    # Import GLOBAL_P2P_SERVER at runtime to avoid circular import issues if module level is stuck, 
+
+    # Import GLOBAL_P2P_SERVER at runtime to avoid circular import issues if module level is stuck,
     # though we added it to imports above. But explicit check is good.
     from ..state import GLOBAL_P2P_SERVER
 
     args = SimpleNamespace(
         file=temp_path,
         entry_node=entry_node,
-        known_peers=cached_peers, # Pass all known peers
+        known_peers=cached_peers,  # Pass all known peers
         scan=use_scan,
         redundancy=redundancy,
         compression=compression,
@@ -455,39 +461,39 @@ async def upload_file(request):
             # await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
             # distribute is now an async wrapper
             await distribute(args, progress_callback=progress_cb)
-            
+
             # Post-distribution: Add to Filesystem if success
             # We need to load the produced manifest to get ID
             manifest_path = os.path.join("manifests", f"{filename}.manifest")
             if os.path.exists(manifest_path):
-                 try:
-                     with open(manifest_path, 'r') as f:
-                         mdata = json.load(f)
-                         file_id = mdata.get('id')
-                         file_size = mdata.get('size', 0)
-                         
-                     if file_id:
-                         async with FS_LOCK:
-                             root_id = await fs_get_root_id()
-                             entry_data = {
-                                 "type": "file",
-                                 "id": file_id,
-                                 "size": file_size
-                             }
-                             # Add to root "/"
-                             new_root_id = await FS_MANAGER.update_path(
-                                 root_id,
-                                 "/",
-                                 filename,
-                                 entry_data,
-                                 fs_fetch_node_fn,
-                                 fs_store_node_fn
-                             )
-                             await fs_set_root_id(new_root_id)
-                             print(f"Added {filename} to Filesystem root.")
-                 except Exception as e:
-                     print(f"Failed to add to filesystem: {e}")
-            
+                try:
+                    with open(manifest_path, 'r') as f:
+                        mdata = json.load(f)
+                        file_id = mdata.get('id')
+                        file_size = mdata.get('size', 0)
+
+                    if file_id:
+                        async with FS_LOCK:
+                            root_id = await fs_get_root_id()
+                            entry_data = {
+                                "type": "file",
+                                "id": file_id,
+                                "size": file_size
+                            }
+                            # Add to root "/"
+                            new_root_id = await FS_MANAGER.update_path(
+                                root_id,
+                                "/",
+                                filename,
+                                entry_data,
+                                fs_fetch_node_fn,
+                                fs_store_node_fn
+                            )
+                            await fs_set_root_id(new_root_id)
+                            print(f"Added {filename} to Filesystem root.")
+                except Exception as e:
+                    print(f"Failed to add to filesystem: {e}")
+
         except Exception as e:
             TASKS[task_id]["status"] = "error"
             TASKS[task_id]["message"] = f"Internal Error: {str(e)}"

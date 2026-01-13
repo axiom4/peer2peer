@@ -65,11 +65,11 @@ class RepairManager:
         # But RepairManager is currently passive.
         # TODO: Ideally RepairManager should accept a P2PServer instance or Bridge.
         # For now, we cannot instantiate functioning RemoteLibP2PNode without a running Trio loop/bridge.
-        active_nodes_objects = [] 
-        
+        active_nodes_objects = []
+
         if not active_nodes_objects:
-             # print("No active nodes for repair (LibP2P implementation pending)")
-             pass
+            # print("No active nodes for repair (LibP2P implementation pending)")
+            pass
 
         # Build map of chunk_id -> [urls]
         all_chunk_ids = [c['id'] for c in chunks]
@@ -112,9 +112,10 @@ class RepairManager:
                 try:
                     # sources = [RemoteLibP2PNode(u) for u in live_locations]
                     sources = []
-                    
+
                     if not sources:
-                        print(f"Cannot repair {chunk_id}: No live sources found or unimplemented.")
+                        print(
+                            f"Cannot repair {chunk_id}: No live sources found or unimplemented.")
                         continue
 
                     if not sources:

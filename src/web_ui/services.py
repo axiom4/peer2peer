@@ -41,14 +41,16 @@ async def get_active_peers():
 
     async with state.PEER_SCAN_LOCK:
         now = time.time()
-        
+
         # Determine local identity to filter out self
         local_ids = []
         if state.GLOBAL_P2P_SERVER and hasattr(state.GLOBAL_P2P_SERVER, 'host'):
             try:
-                local_ids.append(state.GLOBAL_P2P_SERVER.host.get_id().to_string())
-            except: pass
-            
+                local_ids.append(
+                    state.GLOBAL_P2P_SERVER.host.get_id().to_string())
+            except:
+                pass
+
         if state.PEER_CACHE and (now - state.LAST_PEER_SCAN < CACHE_TTL):
             peers = list(state.PEER_CACHE)
         else:
@@ -56,7 +58,7 @@ async def get_active_peers():
             try:
                 # 1. Try UDP Scan
                 found_list = await scan_network(timeout=3)
-                
+
                 # 2. If Scan failed (likely port bind issue), check internal DiscoveryService
                 if not found_list and state.GLOBAL_P2P_SERVER and state.GLOBAL_P2P_SERVER.discovery:
                     found_list = list(state.GLOBAL_P2P_SERVER.discovery.peers)
@@ -70,7 +72,7 @@ async def get_active_peers():
             except Exception as e:
                 print(f"Peer scan failed: {e}")
                 peers = list(state.PEER_CACHE)
-        
+
         # Filter out self
         filtered_peers = []
         for p in peers:
@@ -82,16 +84,15 @@ async def get_active_peers():
                     break
             if not is_self:
                 filtered_peers.append(p)
-                
-        return filtered_peers
 
+        return filtered_peers
 
 
 async def get_dht_nodes(count=5):
     """Returns a deterministic list of Nodes for metadata consistency."""
     # stable_peers = [f"http://127.0.0.1:{8000+i}" for i in range(20)]
     # return [RemoteHttpNode(u) for u in stable_peers[:count]]
-    return [] # HTTP DHT not supported in LibP2P mode yet
+    return []  # HTTP DHT not supported in LibP2P mode yet
 
 
 async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
@@ -99,26 +100,26 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
     # Check local cache first (Read-Your-Writes)
     if node_id in NODE_CACHE:
         return NODE_CACHE[node_id]
-        
+
     server = state.GLOBAL_P2P_SERVER
     if not server:
         return None
-        
+
     peers = await get_active_peers()
     loop = asyncio.get_running_loop()
-    
+
     async def _try_fetch(peer_addr):
         try:
-             node = RemoteLibP2PNode(peer_addr, server.bridge, loop)
-             data = await node.retrieve_async(node_id)
-             return data
+            node = RemoteLibP2PNode(peer_addr, server.bridge, loop)
+            data = await node.retrieve_async(node_id)
+            return data
         except:
-             return None
+            return None
 
     tasks = [_try_fetch(p) for p in peers]
     if not tasks:
         return None
-        
+
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result:
@@ -126,7 +127,8 @@ async def fs_fetch_node_fn(node_id: str) -> Optional[str]:
                 json_str = result.decode('utf-8')
                 NODE_CACHE[node_id] = json_str
                 return json_str
-            except: pass
+            except:
+                pass
     return None
 
 
@@ -138,7 +140,7 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
 
     # Store on LibP2P Network
     server = state.GLOBAL_P2P_SERVER
-    
+
     if not server:
         # If no global server (e.g. testing), we can't persist to network efficiently here
         # without spinning up a new host which is slow.
@@ -150,12 +152,12 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
     if not peers:
         print("Warning: No peers found for FS storage. Stored locally.")
         return node_hash
-        
+
     data = json_val.encode('utf-8')
     loop = asyncio.get_running_loop()
-    
+
     success_count = 0
-    
+
     async def _pusher(peer_addr):
         nonlocal success_count
         try:
@@ -170,10 +172,10 @@ async def fs_store_node_fn(node: DirectoryNode) -> str:
 
     if success_count == 0:
         # Warn but don't crash
-        print(f"Warning: Failed to replicate directory node {node_hash} to network.")
+        print(
+            f"Warning: Failed to replicate directory node {node_hash} to network.")
 
     return node_hash
-
 
 
 async def fs_get_root_id() -> Optional[str]:
@@ -185,24 +187,24 @@ async def fs_get_root_id() -> Optional[str]:
     server = state.GLOBAL_P2P_SERVER
     if not server:
         return None
-        
+
     peers = await get_active_peers()
     loop = asyncio.get_running_loop()
 
     # Try to retrieve FS_ROOT_KEY as a chunk/file
     async def _try_fetch(peer_addr):
         try:
-             node = RemoteLibP2PNode(peer_addr, server.bridge, loop)
-             # "Retrieving" the root key file
-             data = await node.retrieve_async(FS_ROOT_KEY)
-             return data
+            node = RemoteLibP2PNode(peer_addr, server.bridge, loop)
+            # "Retrieving" the root key file
+            data = await node.retrieve_async(FS_ROOT_KEY)
+            return data
         except:
-             return None
+            return None
 
     tasks = [_try_fetch(p) for p in peers]
     if not tasks:
         return None
-        
+
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result:
@@ -210,7 +212,8 @@ async def fs_get_root_id() -> Optional[str]:
                 root_id = result.decode('utf-8')
                 state.CACHED_ROOT_ID = root_id
                 return root_id
-            except: pass
+            except:
+                pass
     return None
 
 
@@ -222,19 +225,21 @@ async def fs_set_root_id(new_root_id: str):
     server = state.GLOBAL_P2P_SERVER
     if not server:
         # Warn if no server
-        print(f"Warning: No Global P2P Server, FS Root ID {FS_ROOT_KEY} updated in memory only.")
+        print(
+            f"Warning: No Global P2P Server, FS Root ID {FS_ROOT_KEY} updated in memory only.")
         return
 
     peers = await get_active_peers()
     if not peers:
-        print(f"Warning: No peers found. FS Root ID {FS_ROOT_KEY} updated locally/memory.")
+        print(
+            f"Warning: No peers found. FS Root ID {FS_ROOT_KEY} updated locally/memory.")
         return
-        
+
     data = new_root_id.encode('utf-8')
     loop = asyncio.get_running_loop()
-    
+
     success_count = 0
-    
+
     async def _pusher(peer_addr):
         nonlocal success_count
         try:
@@ -249,7 +254,8 @@ async def fs_set_root_id(new_root_id: str):
     await asyncio.gather(*[_pusher(p) for p in peers])
 
     if success_count == 0:
-         print(f"Warning: Failed to update FS Root ID {FS_ROOT_KEY} on any node.")
+        print(
+            f"Warning: Failed to update FS Root ID {FS_ROOT_KEY} on any node.")
 
 
 async def check_chunk_task(chunk_id, peers):
@@ -262,10 +268,10 @@ async def check_chunk_task(chunk_id, peers):
 
     # peers should be list of multiaddr strings
     locations = []
-    
+
     # We need to run checks in parallel
     # We can use asyncio.gather for this, wrapping RemoteLibP2PNode calls
-    
+
     server = state.GLOBAL_P2P_SERVER
     loop = asyncio.get_running_loop()
 
@@ -282,8 +288,8 @@ async def check_chunk_task(chunk_id, peers):
     tasks = [sub_check(p) for p in peers]
     if not tasks:
         return chunk_id, []
-        
+
     results = await asyncio.gather(*tasks)
     locations = [r for r in results if r]
-    
+
     return chunk_id, locations

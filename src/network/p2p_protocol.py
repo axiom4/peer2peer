@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 CHUNK_PROTOCOL = TProtocol("/peer2peer/chunk/1.0.0")
 
+
 class P2PProtocol:
     def __init__(self, storage_dir: str, catalog_handler: Callable = None, catalog_provider: Callable = None):
         self.storage_dir = storage_dir
@@ -24,13 +25,13 @@ class P2PProtocol:
             if not len_bytes:
                 return
             header_len = int.from_bytes(len_bytes, 'big')
-            
+
             # Read header
             header_bytes = await stream.read(header_len)
             header = json.loads(header_bytes.decode('utf-8'))
-            
+
             msg_type = header.get('type')
-            
+
             if msg_type == 'STORE':
                 await self._handle_store(stream, header)
             elif msg_type == 'RETRIEVE':
@@ -43,7 +44,7 @@ class P2PProtocol:
                 await self._handle_get_catalog(stream, header)
             elif msg_type == 'CHECK':
                 await self._handle_check(stream, header)
-            
+
             await stream.close()
         except Exception as e:
             logger.error(f"Error handling P2P stream: {e}")
@@ -51,7 +52,7 @@ class P2PProtocol:
                 await stream.reset()
             except:
                 pass
-    
+
     async def _handle_check(self, stream: INetStream, header: dict):
         chunk_id = header.get('chunk_id')
         import os
@@ -75,20 +76,18 @@ class P2PProtocol:
 
     async def _handle_get_catalog(self, stream: INetStream, header: dict):
         if self.catalog_provider:
-             catalog_data = await self.catalog_provider()
-             response = json.dumps(catalog_data).encode('utf-8')
-             # Write response as simple stream
-             await stream.write(response)
+            catalog_data = await self.catalog_provider()
+            response = json.dumps(catalog_data).encode('utf-8')
+            # Write response as simple stream
+            await stream.write(response)
         else:
-             await stream.write(b'[]')
-
-
+            await stream.write(b'[]')
 
     async def _handle_store(self, stream: INetStream, header: dict):
         chunk_id = header['chunk_id']
         # Read the rest of the stream as data
         data = await stream.read()
-        
+
         # Save to disk
         import os
         path = os.path.join(self.storage_dir, chunk_id)
@@ -103,12 +102,12 @@ class P2PProtocol:
         chunk_id = header['chunk_id']
         import os
         path = os.path.join(self.storage_dir, chunk_id)
-        
+
         if os.path.exists(path):
             try:
                 with open(path, 'rb') as f:
                     data = f.read()
-                
+
                 # Write data in chunks to avoid buf size limit
                 CHUNK_SIZE = 60000
                 offset = 0
@@ -123,4 +122,3 @@ class P2PProtocol:
                 # Maybe send an error header? Simpler to just close for now.
         else:
             logger.warning(f"Chunk {chunk_id} not found for retrieval")
-
