@@ -17,11 +17,16 @@ from ..deps import (
     scan_network,
     RepairManager,
     MetadataManager,
-    RemoteHttpNode,
+    # RemoteHttpNode,
+    RemoteLibP2PNode,
     DistributionStrategy
 )
-from ..state import TASKS
-from ..services import get_active_peers, check_chunk_task, get_dht_nodes, fs_fetch_node_fn
+from .. import state
+from ..state import TASKS, FS_MANAGER, FS_LOCK
+from ..services import (
+    get_active_peers, check_chunk_task, get_dht_nodes, fs_fetch_node_fn,
+    fs_get_root_id, fs_set_root_id, fs_store_node_fn
+)
 
 
 async def get_progress(request):
@@ -143,7 +148,12 @@ async def _delete_file_from_network(manifest_id, name_hint=None, peers=None, kno
 
     if manifest_id:
         try:
-            dht_nodes = [RemoteHttpNode(url) for url in broadcast_targets]
+            # dht_nodes = [RemoteLibP2PNode(url, None, None) for url in broadcast_targets]
+            dht_nodes = [] 
+            if state.GLOBAL_P2P_SERVER:
+                loop = asyncio.get_running_loop()
+                dht_nodes = [RemoteLibP2PNode(url, state.GLOBAL_P2P_SERVER.bridge, loop) for url in broadcast_targets]
+            
             cat = CatalogClient()
             await cat.delete(manifest_id, dht_nodes)
             if name_hint:
@@ -289,98 +299,80 @@ async def get_manifest_detail(request):
     with open(manifest_path, 'r') as f:
         data = json.load(f)
 
-    found_peers = await scan_network(timeout=2.0)
-    queue = list(found_peers)
-    visited = set(found_peers)
-    if queue:
-        async with aiohttp.ClientSession() as session:
-            crawl_tasks = []
-            for p in queue:
-                crawl_tasks.append(session.get(f"{p}/peers", timeout=0.8))
-            try:
-                responses = await asyncio.gather(*crawl_tasks, return_exceptions=True)
-                for res in responses:
-                    if not isinstance(res, Exception) and res.status == 200:
-                        try:
-                            p_data = await res.json()
-                            for extended_peer in p_data.get('peers', []):
-                                visited.add(extended_peer.rstrip('/'))
-                        except:
-                            pass
-            except:
-                pass
-    active_peers = list(visited)
+    active_peers = await get_active_peers()
 
     if active_peers:
-        async with aiohttp.ClientSession() as session:
-            chunk_tasks = []
-            for chunk in data['chunks']:
-                chunk_tasks.append(check_chunk_task(
-                    session, chunk['id'], active_peers))
-            results = await asyncio.gather(*chunk_tasks)
-            lookup = {cid: locs for cid, locs in results}
-            for chunk in data['chunks']:
-                chunk['locations'] = lookup.get(chunk['id'], [])
+        # Check chunks using LibP2P
+        chunk_tasks = []
+        for chunk in data['chunks']:
+            chunk_tasks.append(check_chunk_task(
+                chunk['id'], active_peers))
+        results = await asyncio.gather(*chunk_tasks)
+        lookup = {cid: locs for cid, locs in results}
+        for chunk in data['chunks']:
+            chunk['locations'] = lookup.get(chunk['id'], [])
 
     return web.json_response(data)
 
 
 async def get_manifest_by_id(request):
     manifest_id = request.match_info['id']
-    peers = await get_active_peers()
-    if not peers:
-        peers = ['http://127.0.0.1:8000',
-                 'http://127.0.0.1:8001', 'http://127.0.0.1:8002']
-
-    queue = list(peers)
-    visited = set(peers)
-    if queue:
-        async with aiohttp.ClientSession() as session:
-            crawl_tasks = []
-            for p in queue:
-                crawl_tasks.append(session.get(f"{p}/peers", timeout=0.8))
-            try:
-                responses = await asyncio.gather(*crawl_tasks, return_exceptions=True)
-                for res in responses:
-                    if not isinstance(res, Exception) and res.status == 200:
+    data = None
+    
+    # 1. Try Local Lookup in manifests directory
+    # We scan all manifests because filename != id usually
+    manifest_dir = 'manifests'
+    if os.path.exists(manifest_dir):
+        try:
+            # Quick check if it exists as {id}.manifest (sometimes used)
+            path_direct = os.path.join(manifest_dir, f"{manifest_id}.manifest")
+            if os.path.exists(path_direct):
+                with open(path_direct, 'r') as f:
+                    data = json.load(f)
+            else:
+                # Scan all
+                for fname in os.listdir(manifest_dir):
+                    if fname.endswith('.manifest'):
                         try:
-                            p_data = await res.json()
-                            for extended_peer in p_data.get('peers', []):
-                                visited.add(extended_peer.rstrip('/'))
-                        except:
-                            pass
-            except:
-                pass
+                            fpath = os.path.join(manifest_dir, fname)
+                            with open(fpath, 'r') as f:
+                                tdata = json.load(f)
+                                if tdata.get('id') == manifest_id:
+                                    data = tdata
+                                    break
+                        except: pass
+        except: pass
 
-    active_peers = list(visited)
-    nodes = [RemoteHttpNode(u) for u in active_peers]
-    distributor = DistributionStrategy(nodes)
-    if not nodes:
-        nodes = [RemoteHttpNode(
-            f"http://127.0.0.1:{8000+i}") for i in range(5)]
-        distributor = DistributionStrategy(nodes)
+    active_peers = await get_active_peers()
 
-    try:
-        manifest_data_bytes = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: distributor.retrieve_chunk(manifest_id)
-        )
-        data = json.loads(manifest_data_bytes)
-    except Exception as e:
-        return web.json_response({"error": f"Failed to retrieve manifest: {str(e)}"}, status=404)
+    # 2. Try Network Lookup if not found locally
+    if not data and active_peers and state.GLOBAL_P2P_SERVER:
+        try:
+            loop = asyncio.get_running_loop()
+            nodes = [RemoteLibP2PNode(p, state.GLOBAL_P2P_SERVER.bridge, loop) for p in active_peers]
+            distributor = DistributionStrategy(nodes)
+            
+            # Use async retrieve
+            manifest_bytes = await distributor.retrieve_chunk_async(manifest_id)
+            if manifest_bytes:
+                data = json.loads(manifest_bytes)
+        except Exception as e:
+            # print(f"Manifest network fetch failed: {e}")
+            pass
 
+    if not data:
+        return web.json_response({"error": "Manifest not found"}, status=404)
+
+    # 3. Enrich with Chunk Locations
     if active_peers:
-        async with aiohttp.ClientSession() as session:
-            # Use a semaphore to prevent flooding the network/event loop
-            # Check 10 chunks at a time (each chunk checks N peers)
-            sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(10)
+        async def bounded_check(chunk):
+            async with sem:
+                return await check_chunk_task(chunk['id'], active_peers)
 
-            async def bounded_check(chunk):
-                async with sem:
-                    return await check_chunk_task(session, chunk['id'], active_peers)
-
-            chunk_tasks = [bounded_check(chunk) for chunk in data['chunks']]
+        chunk_tasks = [bounded_check(chunk) for chunk in data.get('chunks', [])]
+        if chunk_tasks:
             results = await asyncio.gather(*chunk_tasks)
-
             lookup = {cid: locs for cid, locs in results}
             for chunk in data['chunks']:
                 chunk['locations'] = lookup.get(chunk['id'], [])
@@ -429,13 +421,19 @@ async def upload_file(request):
     cached_peers = await get_active_peers()
     entry_node = random.choice(cached_peers) if cached_peers else None
     use_scan = (entry_node is None)
+    
+    # Import GLOBAL_P2P_SERVER at runtime to avoid circular import issues if module level is stuck, 
+    # though we added it to imports above. But explicit check is good.
+    from ..state import GLOBAL_P2P_SERVER
 
     args = SimpleNamespace(
         file=temp_path,
         entry_node=entry_node,
+        known_peers=cached_peers, # Pass all known peers
         scan=use_scan,
         redundancy=redundancy,
-        compression=compression
+        compression=compression,
+        server=GLOBAL_P2P_SERVER
     )
 
     task_id = str(uuid.uuid4())
@@ -454,7 +452,42 @@ async def upload_file(request):
 
     async def background_distribute():
         try:
-            await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
+            # await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
+            # distribute is now an async wrapper
+            await distribute(args, progress_callback=progress_cb)
+            
+            # Post-distribution: Add to Filesystem if success
+            # We need to load the produced manifest to get ID
+            manifest_path = os.path.join("manifests", f"{filename}.manifest")
+            if os.path.exists(manifest_path):
+                 try:
+                     with open(manifest_path, 'r') as f:
+                         mdata = json.load(f)
+                         file_id = mdata.get('id')
+                         file_size = mdata.get('size', 0)
+                         
+                     if file_id:
+                         async with FS_LOCK:
+                             root_id = await fs_get_root_id()
+                             entry_data = {
+                                 "type": "file",
+                                 "id": file_id,
+                                 "size": file_size
+                             }
+                             # Add to root "/"
+                             new_root_id = await FS_MANAGER.update_path(
+                                 root_id,
+                                 "/",
+                                 filename,
+                                 entry_data,
+                                 fs_fetch_node_fn,
+                                 fs_store_node_fn
+                             )
+                             await fs_set_root_id(new_root_id)
+                             print(f"Added {filename} to Filesystem root.")
+                 except Exception as e:
+                     print(f"Failed to add to filesystem: {e}")
+            
         except Exception as e:
             TASKS[task_id]["status"] = "error"
             TASKS[task_id]["message"] = f"Internal Error: {str(e)}"

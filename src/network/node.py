@@ -1,5 +1,6 @@
 import os
 import shutil
+import asyncio
 from abc import ABC, abstractmethod
 
 
@@ -8,9 +9,17 @@ class StorageNode(ABC):
     def store(self, chunk_id: str, data: bytes) -> bool:
         pass
 
+    async def store_async(self, chunk_id: str, data: bytes) -> bool:
+        """Default async implementation that wraps the sync method."""
+        return self.store(chunk_id, data)
+
     @abstractmethod
     def retrieve(self, chunk_id: str) -> bytes:
         pass
+
+    async def retrieve_async(self, chunk_id: str) -> bytes:
+        """Default async implementation that wraps the sync method."""
+        return self.retrieve(chunk_id)
 
     @abstractmethod
     def get_id(self) -> str:

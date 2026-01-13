@@ -5,7 +5,8 @@ import random
 from typing import List, Dict, Set
 from core.metadata import MetadataManager
 from core.distribution import DistributionStrategy
-from network.remote_node import RemoteHttpNode
+# from network.remote_node import RemoteHttpNode
+from network.remote_node import RemoteLibP2PNode
 from network.discovery import scan_network, udp_search_chunk_owners
 
 
@@ -60,7 +61,15 @@ class RepairManager:
             progress_cb(10, "Surveying network inventory (UDP SEARCH)...")
 
         # Prepare active nodes objects for later use (replication targets)
-        active_nodes_objects = [RemoteHttpNode(u) for u in active_nodes_urls]
+        # We need a P2PServer bridge to create RemoteLibP2PNode.
+        # But RepairManager is currently passive.
+        # TODO: Ideally RepairManager should accept a P2PServer instance or Bridge.
+        # For now, we cannot instantiate functioning RemoteLibP2PNode without a running Trio loop/bridge.
+        active_nodes_objects = [] 
+        
+        if not active_nodes_objects:
+             # print("No active nodes for repair (LibP2P implementation pending)")
+             pass
 
         # Build map of chunk_id -> [urls]
         all_chunk_ids = [c['id'] for c in chunks]
@@ -101,7 +110,12 @@ class RepairManager:
                 # Retrieve content
                 content = None
                 try:
-                    sources = [RemoteHttpNode(u) for u in live_locations]
+                    # sources = [RemoteLibP2PNode(u) for u in live_locations]
+                    sources = []
+                    
+                    if not sources:
+                        print(f"Cannot repair {chunk_id}: No live sources found or unimplemented.")
+                        continue
 
                     if not sources:
                         # Data Loss detected or just not found on active nodes

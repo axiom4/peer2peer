@@ -1,5 +1,6 @@
 import random
 import concurrent.futures
+import asyncio
 from typing import List, Dict
 from network.node import StorageNode
 
@@ -55,6 +56,63 @@ class DistributionStrategy:
                 f"Unable to save chunk {chunk_id} on any node.")
 
         return success_nodes
+
+    async def distribute_chunk_async(self, chunk_id: str, data: bytes, redundancy=None) -> List[str]:
+        """
+        Async version of distribute_chunk.
+        """
+        available_nodes = [n for n in self.nodes if n.is_available()]
+        
+        target_redundancy = redundancy or self.redundancy_factor
+
+        if len(available_nodes) < target_redundancy:
+             # Reduce requirement if not enough nodes
+             target_redundancy = len(available_nodes)
+             if target_redundancy == 0:
+                  raise RuntimeError("No nodes available for distribution.")
+
+        selected_nodes = random.sample(available_nodes, target_redundancy)
+        success_nodes = []
+
+        async def _store_task_async(node):
+            for attempt in range(3):
+                try:
+                    if await node.store_async(chunk_id, data):
+                        return node.get_id()
+                except Exception as e:
+                    # In async we might want to log properly
+                    print(f"Error saving to {node.get_id()} (Attempt {attempt+1}): {e}")
+                    await asyncio.sleep(0.5)
+            return None
+
+        # Gather results
+        results = await asyncio.gather(*[_store_task_async(n) for n in selected_nodes])
+        
+        success_nodes = [r for r in results if r is not None]
+
+        if not success_nodes:
+            raise RuntimeError(
+                f"Unable to save chunk {chunk_id} on any node.")
+
+        return success_nodes
+
+    async def retrieve_chunk_async(self, chunk_id: str) -> bytes:
+        """
+        Async version of retrieve_chunk.
+        """
+        candidates = [n for n in self.nodes if n.is_available()]
+        random.shuffle(candidates)
+
+        for node in candidates:
+            try:
+                return await node.retrieve_async(chunk_id)
+            except Exception as e:
+                # print(f"Debug: Failed to retrieve from {node.get_id()}: {e}")
+                await asyncio.sleep(0.05)
+                continue
+
+        raise RuntimeError(
+            f"Chunk {chunk_id} not found on network (checked {len(candidates)} nodes/gateways).")
 
     def retrieve_chunk(self, chunk_id: str) -> bytes:
         """

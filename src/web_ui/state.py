@@ -16,3 +16,6 @@ PEER_CACHE = set()
 LAST_PEER_SCAN = 0
 PEER_SCAN_LOCK = asyncio.Lock()
 CACHE_TTL = 300  # 5 minutes
+
+# Global P2P Server instance
+GLOBAL_P2P_SERVER = None

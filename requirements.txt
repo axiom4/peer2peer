@@ -17,3 +17,6 @@ pycparser==2.23
 requests==2.32.5
 urllib3==2.6.3
 yarl==1.22.0
+libp2p
+multiaddr
+protobuf

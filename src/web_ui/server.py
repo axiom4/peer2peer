@@ -14,13 +14,41 @@ from .api.filesystem import (
     handle_fs_ls, handle_fs_mkdir, handle_fs_add_file,
     handle_fs_delete, handle_fs_move
 )
+from . import state
+try:
+    from network.p2p_server import P2PServer
+except ImportError:
+    from src.network.p2p_server import P2PServer
+import asyncio
 
+async def on_startup(app):
+    # Initialize Global P2P Server for the Web UI Node
+    # Find a free random port to ensure valid advertising (port 0 is invalid for connect)
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('127.0.0.1', 0))
+    free_port = sock.getsockname()[1]
+    sock.close()
+    
+    server = P2PServer("127.0.0.1", free_port, "uploads_temp")
+    await server.initialize()
+    # Start server logic (discovery etc) in background
+    asyncio.create_task(server.start())
+    state.GLOBAL_P2P_SERVER = server
+    print(f"Global P2P Server initialized for Web UI: {server.host.get_id().to_string()} on port {free_port}")
+
+async def on_cleanup(app):
+    # Retrieve server from state if needed, but trio loop handling is complex.
+    # For now, let it die with the process.
+    pass
 
 def start_web_server(port=8888):
     # Ensure downloads directory exists for static serving
     os.makedirs('downloads', exist_ok=True)
 
     app = web.Application()
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
 
     # Setup Jinja2 template loader
     templates_path = os.path.join(os.path.dirname(__file__), 'templates')

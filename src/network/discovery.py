@@ -13,13 +13,17 @@ BEACON_INTERVAL = 1
 
 
 class DiscoveryService:
-    def __init__(self, http_port):
+    def __init__(self, http_port, peer_id=None):
         self.http_port = http_port
+        self.peer_id = peer_id
         self.running = False
         self.peers = set()
         self.broadcast_sock = None
         self.listen_sock = None
         self.storage_check_cb = None
+
+    def set_peer_id(self, peer_id: str):
+        self.peer_id = peer_id
 
     def set_storage_check(self, callback):
         self.storage_check_cb = callback
@@ -60,10 +64,14 @@ class DiscoveryService:
         while self.running:
             try:
                 # Announce my presence
-                message = json.dumps({
+                msg_dict = {
                     "type": "HELLO",
                     "port": self.http_port
-                }).encode('utf-8')
+                }
+                if self.peer_id:
+                    msg_dict["peer_id"] = self.peer_id
+                    
+                message = json.dumps(msg_dict).encode('utf-8')
 
                 self.broadcast_sock.sendto(
                     message, ('<broadcast>', BROADCAST_PORT))
@@ -81,9 +89,16 @@ class DiscoveryService:
                 if message.get("type") == "HELLO":
                     peer_host = addr[0]  # IP of the sender
                     peer_port = message.get("port")
+                    remote_peer_id = message.get("peer_id")
 
                     if peer_port and peer_port != self.http_port:
-                        peer_url = f"http://{peer_host}:{peer_port}"
+                        # Construct Multiaddr
+                        if remote_peer_id:
+                            peer_url = f"/ip4/{peer_host}/tcp/{peer_port}/p2p/{remote_peer_id}"
+                        else:
+                            # Fallback (might fail later but better than nothing)
+                            peer_url = f"/ip4/{peer_host}/tcp/{peer_port}"
+                            
                         if peer_url not in self.peers:
                             logger.info(f"Discovered peer via UDP: {peer_url}")
                             self.peers.add(peer_url)
@@ -99,10 +114,17 @@ class DiscoveryService:
                         # This is the source port of the UDP packet
                         sender_port = addr[1]
 
+                        # Reply with Multiaddr
+                        my_ip = socket.gethostbyname(socket.gethostname())
+                        
+                        my_url = f"/ip4/{my_ip}/tcp/{self.http_port}"
+                        if self.peer_id:
+                            my_url += f"/p2p/{self.peer_id}"
+                            
                         reply = json.dumps({
                             "type": "I_HAVE",
                             "chunk_id": chunk_id,
-                            "url": f"http://{socket.gethostbyname(socket.gethostname())}:{self.http_port}"
+                            "url": my_url
                         }).encode('utf-8')
 
                         # We send reply from our broadcast socket (or listen socket, doesn't matter much for UDP)
@@ -151,7 +173,15 @@ def _scan_network_sync(timeout=3):
             data, addr = sock.recvfrom(1024)
             message = json.loads(data.decode('utf-8'))
             if message.get("type") == "HELLO":
-                peer_url = f"http://{addr[0]}:{message['port']}"
+                remote_port = int(message.get('port', 0))
+                if remote_port <= 0:
+                    continue
+                
+                remote_peer_id = message.get("peer_id")
+                if remote_peer_id:
+                     peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}/p2p/{remote_peer_id}"
+                else:
+                     peer_url = f"/ip4/{addr[0]}/tcp/{remote_port}"
                 found_peers.add(peer_url)
         except socket.timeout:
             break
@@ -216,16 +246,18 @@ def _udp_search_sync(chunk_ids, timeout):
                 raw_url = msg.get("url")
 
                 # Normalize URL to use the observed IP address (addr[0])
-                # This ensures consistency with scan_network which uses addr[0]
-                # preventing mismatch between "candidates" and "live_locations"
+                # We assume raw_url is a multiaddr like /ip4/x.x.x.x/tcp/port
+                # We want to replace x.x.x.x with addr[0]
+                url = raw_url
                 try:
-                    parsed = urlparse(raw_url)
-                    if parsed.port:
-                        url = f"http://{addr[0]}:{parsed.port}"
-                    else:
-                        url = raw_url
+                    if raw_url.startswith("/ip4/"):
+                        parts = raw_url.split("/")
+                        # parts = ['', 'ip4', '1.2.3.4', 'tcp', '8080']
+                        if len(parts) >= 5:
+                            parts[2] = addr[0]
+                            url = "/".join(parts)
                 except:
-                    url = raw_url
+                    pass
 
                 if cid in results:
                     results[cid].add(url)
