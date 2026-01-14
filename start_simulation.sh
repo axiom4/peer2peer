@@ -40,7 +40,10 @@ do
 done
 
 echo "Starting Web UI on port 8888..."
-nohup $PYTHON_CMD src/main.py web-ui --port 8888 > "$LOG_DIR/web_ui.log" 2>&1 &
+if [ ! -d "network_data/web_ui_storage" ]; then
+    mkdir -p "network_data/web_ui_storage"
+fi
+nohup $PYTHON_CMD src/main.py web-ui --port 8888 --storage-dir network_data/web_ui_storage > "$LOG_DIR/web_ui.log" 2>&1 &
 echo "Web UI started at http://localhost:8888"
 
 echo "Done. Use 'stop_simulation.sh' to stop all nodes."

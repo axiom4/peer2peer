@@ -167,22 +167,27 @@ class P2PServer:
 
                 # Iterate over connected peer IDs
                 for peer_id in host.get_network().connections:
-                    # Get known addresses for this peer
-                    addrs = host.get_peerstore().addrs(peer_id)
-                    if addrs:
-                        # Use the first address and encapsulate peer ID
-                        # This creates /ip4/.../tcp/.../p2p/Qm...
-                        maddr = addrs[0]
-                        # Check if p2p protocol is already in maddr (it shouldn't be for transport addrs)
-                        # but let's be safe
-                        s = str(maddr)
-                        if "/p2p/" not in s:
-                            from multiaddr import Multiaddr
-                            p2p_part = Multiaddr(f"/p2p/{peer_id.to_string()}")
-                            maddr = maddr.encapsulate(p2p_part)
-                        peers.append(str(maddr))
+                    try:
+                        # Get known addresses for this peer
+                        addrs = host.get_peerstore().addrs(peer_id)
+                        if addrs:
+                            # Use the first address and encapsulate peer ID
+                            # This creates /ip4/.../tcp/.../p2p/Qm...
+                            maddr = addrs[0]
+                            # Check if p2p protocol is already in maddr (it shouldn't be for transport addrs)
+                            # but let's be safe
+                            s = str(maddr)
+                            if "/p2p/" not in s:
+                                from multiaddr import Multiaddr
+                                p2p_part = Multiaddr(f"/p2p/{peer_id.to_string()}")
+                                maddr = maddr.encapsulate(p2p_part)
+                            peers.append(str(maddr))
+                    except Exception as loop_e:
+                        logger.debug(f"Skipping peer {peer_id}: {loop_e}")
             except Exception as e:
                 logger.error(f"Error getting active peers: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
             return peers
 
         return await self.bridge.run_trio_task(_get_peers)

@@ -67,7 +67,7 @@ async def distribute_wrapper(args, progress_callback=None):
         # await server.start() # Starts background tasks - don't start loop if possible
         # Just initialize host so we can use it
 
-    await _distribute_logic(args, server, progress_callback)
+    return await _distribute_logic(args, server, progress_callback)
 
 
 async def _distribute_logic(args, server: P2PServer, progress_callback=None):
@@ -113,12 +113,12 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
     elif getattr(args, 'local', False):
         nodes = setup_local_network()
     else:
-        # Fallback local
-        print("Using local simulation.")
-        nodes = setup_local_network()
+        # Strict mode: If no peers found and not local mode, do NOT fallback to simulation 
+        # to avoid polluting filesystem with "node_X" directories.
+        pass
 
     if not nodes:
-        print("No nodes available.")
+        print("No active nodes available for distribution.")
         return
 
     distributor = DistributionStrategy(nodes, redundancy_factor=redundancy)
@@ -268,16 +268,10 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
 
     # -------------------------------------------------------------
 
-    # Ensure manifests directory exists
-    manifest_dir = "manifests"
-    if not os.path.exists(manifest_dir):
-        os.makedirs(manifest_dir)
-
-    manifest_path = os.path.join(
-        manifest_dir, f"{os.path.basename(file_path)}.manifest")
-    with open(manifest_path, "w") as f:
-        json.dump(manifest_dict, f, indent=2)
-    print(f"Manifest saved to {manifest_path}")
+    # Do not save manifest locally to filesystem
+    # Return it so caller can use it
+    
+    return manifest_dict
 
 
 async def reconstruct_wrapper(args):
@@ -380,7 +374,8 @@ class CatalogClient:
         self.entry_node = entry_node
 
     async def fetch(self, nodes=None) -> List[Dict[str, Any]]:
-        if not nodes:
+        # Only fallback to local simulation if nodes is None (not explicit empty list)
+        if nodes is None:
             # Setup local network for discovery if no nodes provided
             nodes = setup_local_network()
 
@@ -406,7 +401,7 @@ class CatalogClient:
         return all_items
 
     async def delete(self, manifest_id, nodes=None):
-        if not nodes:
+        if nodes is None:
             nodes = setup_local_network()
 
         import asyncio

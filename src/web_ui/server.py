@@ -31,7 +31,8 @@ async def on_startup(app):
     free_port = sock.getsockname()[1]
     sock.close()
 
-    server = P2PServer("127.0.0.1", free_port, "uploads_temp")
+    storage_dir = app.get("storage_dir", "network_data/web_ui_storage")
+    server = P2PServer("127.0.0.1", free_port, storage_dir)
     await server.initialize()
     # Start server logic (discovery etc) in background
     asyncio.create_task(server.start())
@@ -46,11 +47,12 @@ async def on_cleanup(app):
     pass
 
 
-def start_web_server(port=8888):
+def start_web_server(port=8888, storage_dir="network_data/web_ui_storage"):
     # Ensure downloads directory exists for static serving
     os.makedirs('downloads', exist_ok=True)
 
     app = web.Application()
+    app["storage_dir"] = storage_dir
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
 

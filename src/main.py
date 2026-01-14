@@ -62,6 +62,8 @@ def main():
     web_parser = subparsers.add_parser("web-ui", help="Start Web UI")
     web_parser.add_argument(
         "--port", type=int, default=8888, help="Port to listen on")
+    web_parser.add_argument(
+        "--storage-dir", type=str, default="network_data/web_ui_storage", help="Data folder for Web UI node")
 
     args = parser.parse_args()
 
@@ -72,7 +74,7 @@ def main():
     elif args.command == "reconstruct":
         asyncio.run(reconstruct_wrapper(args))
     elif args.command == "web-ui":
-        start_web_server(port=args.port)
+        start_web_server(port=args.port, storage_dir=args.storage_dir)
     else:
         parser.print_help()
 

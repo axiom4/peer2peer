@@ -182,7 +182,20 @@ async function showDistributionGraph(identifier, isPublic = false) {
 
     // Add Host Nodes
     hostSet.forEach((loc) => {
-      const label = loc.replace(/^https?:\/\//, ""); // Show IP:Port
+      let label = loc.replace(/^https?:\/\//, ""); // Show IP:Port (Default/Legacy)
+
+      // Handle LibP2P MultiAddr: /ip4/127.0.0.1/tcp/8001/p2p/Qm...
+      if (loc.startsWith("/ip4/") || loc.startsWith("/ip6/")) {
+        const parts = loc.split("/");
+        // ["", "ip4", "127.0.0.1", "tcp", "8001", ...]
+        const ipIdx = parts.indexOf("ip4") !== -1 ? parts.indexOf("ip4") + 1 : parts.indexOf("ip6") + 1;
+        const tcpIdx = parts.indexOf("tcp") + 1;
+        
+        if (ipIdx > 0 && tcpIdx > 0 && parts[ipIdx] && parts[tcpIdx]) {
+           label = `${parts[ipIdx]}:${parts[tcpIdx]}`;
+        }
+      }
+
       nodes.push({
         id: loc,
         label: label,

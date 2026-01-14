@@ -401,7 +401,11 @@ async def upload_file(request):
             filename = field.filename
             if filename:
                 filename = os.path.basename(filename)
-                upload_dir = "uploads_temp"
+                
+                # Use configured storage dir if available
+                storage_dir = request.app.get("storage_dir", "uploads_temp")
+                upload_dir = os.path.join(storage_dir, "temp_uploads")
+                
                 os.makedirs(upload_dir, exist_ok=True)
                 temp_path = os.path.join(upload_dir, filename)
                 loop = asyncio.get_event_loop()
@@ -460,17 +464,13 @@ async def upload_file(request):
         try:
             # await loop.run_in_executor(None, lambda: distribute(args, progress_callback=progress_cb))
             # distribute is now an async wrapper
-            await distribute(args, progress_callback=progress_cb)
+            mdata = await distribute(args, progress_callback=progress_cb)
 
             # Post-distribution: Add to Filesystem if success
-            # We need to load the produced manifest to get ID
-            manifest_path = os.path.join("manifests", f"{filename}.manifest")
-            if os.path.exists(manifest_path):
+            if mdata:
                 try:
-                    with open(manifest_path, 'r') as f:
-                        mdata = json.load(f)
-                        file_id = mdata.get('id')
-                        file_size = mdata.get('size', 0)
+                    file_id = mdata.get('id')
+                    file_size = mdata.get('size', 0)
 
                     if file_id:
                         async with FS_LOCK:
