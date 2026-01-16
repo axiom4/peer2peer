@@ -190,9 +190,9 @@ async function showDistributionGraph(identifier, isPublic = false) {
         // ["", "ip4", "127.0.0.1", "tcp", "8001", ...]
         const ipIdx = parts.indexOf("ip4") !== -1 ? parts.indexOf("ip4") + 1 : parts.indexOf("ip6") + 1;
         const tcpIdx = parts.indexOf("tcp") + 1;
-        
+
         if (ipIdx > 0 && tcpIdx > 0 && parts[ipIdx] && parts[tcpIdx]) {
-           label = `${parts[ipIdx]}:${parts[tcpIdx]}`;
+          label = `${parts[ipIdx]}:${parts[tcpIdx]}`;
         }
       }
 

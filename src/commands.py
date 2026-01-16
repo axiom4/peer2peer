@@ -113,7 +113,7 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
     elif getattr(args, 'local', False):
         nodes = setup_local_network()
     else:
-        # Strict mode: If no peers found and not local mode, do NOT fallback to simulation 
+        # Strict mode: If no peers found and not local mode, do NOT fallback to simulation
         # to avoid polluting filesystem with "node_X" directories.
         pass
 
@@ -270,7 +270,7 @@ async def _distribute_logic(args, server: P2PServer, progress_callback=None):
 
     # Do not save manifest locally to filesystem
     # Return it so caller can use it
-    
+
     return manifest_dict
 
 

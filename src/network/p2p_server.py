@@ -179,7 +179,8 @@ class P2PServer:
                             s = str(maddr)
                             if "/p2p/" not in s:
                                 from multiaddr import Multiaddr
-                                p2p_part = Multiaddr(f"/p2p/{peer_id.to_string()}")
+                                p2p_part = Multiaddr(
+                                    f"/p2p/{peer_id.to_string()}")
                                 maddr = maddr.encapsulate(p2p_part)
                             peers.append(str(maddr))
                     except Exception as loop_e:
@@ -267,6 +268,11 @@ class P2PServer:
                         except Exception as ex:
                             # logging might be noisy
                             pass
+
+                await self.bridge.run_trio_task(_sync_task)
+            except Exception as e:
+                # logger.error(f"Sync discovery loop error: {e}")
+                pass
 
                 await self.bridge.run_trio_task(_sync_task)
             except Exception as e:

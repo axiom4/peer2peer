@@ -401,11 +401,11 @@ async def upload_file(request):
             filename = field.filename
             if filename:
                 filename = os.path.basename(filename)
-                
+
                 # Use configured storage dir if available
                 storage_dir = request.app.get("storage_dir", "uploads_temp")
                 upload_dir = os.path.join(storage_dir, "temp_uploads")
-                
+
                 os.makedirs(upload_dir, exist_ok=True)
                 temp_path = os.path.join(upload_dir, filename)
                 loop = asyncio.get_event_loop()
