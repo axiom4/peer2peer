@@ -53,7 +53,7 @@ pylsqpack==0.3.23
 PyNaCl==1.6.2
 pyOpenSSL==26.0.0
 python-baseconv==1.2.2
-requests==2.32.5
+requests==2.33.0
 rpcudp==5.0.1
 service-identity==24.2.0
 six==1.17.0
