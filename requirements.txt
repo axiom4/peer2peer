@@ -15,7 +15,7 @@ charset-normalizer==3.5.0
 coincurve==21.0.0
 cryptography==50.0.0
 dnspython==2.8.0
-fastecdsa==2.3.2
+fastecdsa==3.0.1
 frozenlist==1.8.0
 grpcio==1.83.0
 h11==0.16.0
