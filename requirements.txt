@@ -63,7 +63,7 @@ sortedcontainers==2.4.0
 trio==0.34.0
 trio-typing==0.10.0
 trio-websocket==0.12.2
-types-protobuf==7.34.1.20260518
+types-protobuf==7.35.1.20260822
 types-requests==2.33.0.20260712
 typing_extensions==4.16.0
 u-msgpack-python==2.8.0
