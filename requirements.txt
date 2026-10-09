@@ -25,7 +25,7 @@ idna==3.18
 ifaddr==0.2.0
 importlib_metadata==9.0.0
 Jinja2==3.1.6
-libp2p==0.7.0
+libp2p==0.8.0
 lru-dict==1.4.1
 MarkupSafe==3.0.3
 miniupnpc==2.3.3
@@ -67,7 +67,7 @@ types-protobuf==7.34.1.20260518
 types-requests==2.33.0.20260712
 typing_extensions==4.16.0
 u-msgpack-python==2.8.0
-urllib3==2.7.0
+urllib3==2.8.0
 varint==1.0.2
 wsproto==1.3.2
 yarl==1.24.5
