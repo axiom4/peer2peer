@@ -14,7 +14,7 @@ cffi==2.1.1
 charset-normalizer==3.5.2
 coincurve==21.0.0
 cryptography==50.0.2
-dnspython==2.9.1
+dnspython==2.9.2
 fastecdsa==2.3.2
 frozenlist==1.8.0
 grpcio==1.85.0
